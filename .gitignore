@@ -1,0 +1,55 @@
+# ---- 로컬 전용 파일 (원격에 올리지 않음) ----
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+AGENTS.override.md
+.claude/
+.codex/
+.cursor/
+.aider*
+*.local.md
+notes/
+scratch/
+
+# ---- Gradle / Android 빌드 ----
+.gradle/
+.kotlin/
+build/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.hprof
+local.properties
+
+# 빌드 산출 APK/AAB는 올리지 않는다. 제출용 APK만 dist/에 둔다
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+!dist/*.apk
+
+# ---- IDE ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.fleet/
+
+# ---- 서명 키와 비밀값 ----
+*.jks
+*.keystore
+*.p12
+keystore.properties
+.env
+.env.*
+
+# ---- OS와 기타 ----
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*~
