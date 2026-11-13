@@ -32,6 +32,7 @@ object SignalMapper {
         is RawSignal.Location.Zone ->
             if (signal.entered) NightEvent.ZoneEntered(signal.intersectionId, signal.ring)
             else NightEvent.ZoneExited(signal.intersectionId, signal.ring)
+        is RawSignal.Location.ZoneLost -> NightEvent.ZoneDropped(signal.intersectionId)
     }
 
     /** 수동 1~9단은 주행으로 본다. */

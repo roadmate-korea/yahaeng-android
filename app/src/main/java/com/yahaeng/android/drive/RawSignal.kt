@@ -62,5 +62,8 @@ sealed interface RawSignal {
 
         /** FusedLocation 근접 알림의 진입과 이탈. */
         data class Zone(val intersectionId: String, val ring: Ring, val entered: Boolean) : Location
+
+        /** 근접 알림을 뗐다(재계획에서 빠짐, 등록 오류). 실제로 지난 것은 아니다. */
+        data class ZoneLost(val intersectionId: String) : Location
     }
 }

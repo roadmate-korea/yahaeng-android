@@ -145,7 +145,8 @@ fun OnboardingScreen(parked: Boolean, dataRegions: Int, dataSize: Int, onStart: 
                 intro(Modifier.weight(1f)); permCard(Modifier.width(640.dp))
             }
         } else {
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(48.dp), verticalArrangement = Arrangement.spacedBy(48.dp)) {
+            // 주행 중에는 스크롤도 받지 않는다(P에서만 조작)
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState(), enabled = parked).padding(48.dp), verticalArrangement = Arrangement.spacedBy(48.dp)) {
                 intro(Modifier.fillMaxWidth()); permCard(Modifier.fillMaxWidth())
             }
         }

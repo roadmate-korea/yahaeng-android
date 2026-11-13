@@ -74,7 +74,7 @@ adb shell am start --user 10 -n com.yahaeng.android/.debug.DemoControlActivity -
 adb emu geo fix 127.14009 37.5831
 ```
 
-시연 입력은 release APK에 들어가지 않습니다.
+시연 입력 화면은 디버그 빌드에만 있습니다. release APK에서는 시각과 제한 속도를 바꿀 길이 없어 늘 실제 시각과 내비 값을 씁니다.
 
 ## 에뮬레이터에서 확인한 것
 

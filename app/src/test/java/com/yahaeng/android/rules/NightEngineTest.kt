@@ -276,4 +276,168 @@ class NightEngineTest {
         clock.plus(NightEngine.FLASH_GAP_MS)
         assertEquals(listOf(GuidanceId.FLASH_AHEAD), ids(engine.on(NightEvent.ZoneEntered("b", Ring.APPROACH))))
     }
+
+    // ---- 리뷰 반영(2026-11-13) ----
+
+    @Test
+    fun droppedZone_doesNotBlockTheNextIntersection() {
+        drive()
+        engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))
+        engine.on(NightEvent.ZoneDropped("a"))
+        assertNull(engine.state().approaching)
+        clock.plus(NightEngine.FLASH_GAP_MS)
+        assertEquals(listOf(GuidanceId.FLASH_AHEAD), ids(engine.on(NightEvent.ZoneEntered("b", Ring.APPROACH))))
+    }
+
+    @Test
+    fun flashEndingWhileInside_releasesTheAnnouncedIntersection() {
+        val late = FlashingIntersection("late", 37.60, 127.13, FlashWindow(23 * 60, 7 * 60), "", "", "")
+        engine = NightEngine({ FlashMap(listOf(guri, late)) }, clock)
+        clock.at(4, 59)
+        drive()
+        engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))
+        clock.at(5, 5)
+        engine.tick()
+        assertNull("점멸이 끝난 교차로는 화면에서도 내린다", engine.state().approaching)
+        assertEquals(listOf(GuidanceId.FLASH_AHEAD), ids(engine.on(NightEvent.ZoneEntered("late", Ring.APPROACH))))
+    }
+
+    @Test
+    fun enteredBeforeFlashStarts_isAnnouncedWhenFlashingBegins() {
+        clock.at(22, 59)
+        drive()
+        assertTrue(engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH)).none { it.id == GuidanceId.FLASH_AHEAD })
+        clock.at(23, 0)
+        assertEquals(listOf(GuidanceId.FLASH_AHEAD), ids(engine.tick()))
+    }
+
+    @Test
+    fun enteredWhileParked_isAnnouncedOnDeparture() {
+        engine.on(NightEvent.LocationChanged(guri.lat, guri.lon))
+        engine.on(NightEvent.GearChanged(Gear.PARK))
+        assertTrue(engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH)).isEmpty())
+        assertTrue(GuidanceId.FLASH_AHEAD in ids(engine.on(NightEvent.GearChanged(Gear.DRIVE))))
+    }
+
+    @Test
+    fun revalidate_dropsStaleFlashAndTurnGuidance() {
+        drive()
+        val ahead = engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH)).single()
+        val left = engine.on(NightEvent.TurnSignalChanged(TurnSignal.LEFT)).single()
+        engine.on(NightEvent.TurnSignalChanged(TurnSignal.RIGHT))
+        assertNull("방향을 바꿨으면 좌회전 문장은 버린다", engine.revalidate(left))
+        assertEquals(ahead, engine.revalidate(ahead))
+        engine.on(NightEvent.ZoneExited("a", Ring.APPROACH))
+        assertNull("교차로를 벗어났으면 버린다", engine.revalidate(ahead))
+    }
+
+    @Test
+    fun revalidate_rebuildsRainGuidanceWithCurrentValues() {
+        rainyDrive()
+        engine.on(NightEvent.CruiseStateChanged(true))
+        engine.on(NightEvent.CruiseTargetChanged(100))
+        clock.plus(10_000)
+        val g = engine.tick().single()
+        engine.on(NightEvent.SpeedLimitChanged(80))
+        assertEquals(listOf(80, 64, 100), engine.revalidate(g)?.args)
+        engine.on(NightEvent.WiperSwitchChanged(WiperMode.OFF))
+        assertNull("와이퍼를 끄면 버린다", engine.revalidate(g))
+    }
+
+    @Test
+    fun rain_isSilentInTheDaytime() {
+        clock.at(14, 0)
+        rainyDrive()
+        engine.on(NightEvent.CruiseStateChanged(true))
+        engine.on(NightEvent.CruiseTargetChanged(100))
+        clock.plus(10_000)
+        assertTrue(engine.tick().isEmpty())
+        assertNull(engine.state().wetLimit)
+    }
+
+    @Test
+    fun rain_withoutLocation_usesEveningHoursAsNight() {
+        engine.on(NightEvent.GearChanged(Gear.DRIVE))
+        engine.on(NightEvent.SpeedLimitChanged(100))
+        engine.on(NightEvent.WiperSwitchChanged(WiperMode.CONTINUOUS))
+        clock.plus(10_000)
+        assertEquals(80, engine.state().wetLimit)
+    }
+
+    @Test
+    fun wiperPause_restartsTheTenSecondCount() {
+        rainyDrive()
+        engine.on(NightEvent.CruiseStateChanged(true))
+        engine.on(NightEvent.CruiseTargetChanged(100))
+        clock.plus(1_000)
+        engine.on(NightEvent.WiperSwitchChanged(WiperMode.OFF))
+        clock.plus(9_000)
+        assertTrue(engine.on(NightEvent.WiperSwitchChanged(WiperMode.CONTINUOUS)).isEmpty())
+        clock.plus(9_000)
+        assertTrue(engine.tick().isEmpty())
+        clock.plus(1_000)
+        assertEquals(listOf(GuidanceId.RAIN_SPEED_CRUISE), ids(engine.tick()))
+    }
+
+    @Test
+    fun autoWiper_shortPausesBetweenWipes_doNotBreakTheCount() {
+        drive()
+        engine.on(NightEvent.SpeedLimitChanged(100))
+        engine.on(NightEvent.WiperSwitchChanged(WiperMode.AUTO))
+        engine.on(NightEvent.WiperMotionChanged(true))
+        clock.plus(3_000)
+        engine.on(NightEvent.WiperMotionChanged(false))
+        clock.plus(4_000)
+        engine.on(NightEvent.WiperMotionChanged(true))
+        clock.plus(3_000)
+        engine.tick()
+        assertEquals(80, engine.state().wetLimit)
+    }
+
+    @Test
+    fun records_areClearedTheNextNight() {
+        drive()
+        pass(30, 2, 30)
+        engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))
+        pass(40, 40)
+        assertEquals(2, engine.passages.size)
+        clock.at(23, 30)
+        clock.plus(24 * 3_600_000L)
+        engine.tick()
+        assertTrue(engine.passages.isEmpty())
+        assertTrue("지난 밤의 사실 안내도 버린다", engine.on(NightEvent.SpeedChanged(0)).isEmpty())
+    }
+
+    @Test
+    fun recordsAfterMidnight_belongToTheSameNight() {
+        clock.at(23, 50)
+        drive()
+        pass(30, 2, 30)
+        clock.at(23, 59)
+        clock.plus(2 * 3_600_000L)
+        engine.tick()
+        assertEquals(1, engine.passages.size)
+    }
+
+    @Test
+    fun secondSummary_countsTheWholeNight() {
+        drive()
+        pass(30, 2, 30)
+        assertEquals(listOf(1, 1), engine.on(NightEvent.GearChanged(Gear.PARK)).last().args)
+        engine.on(NightEvent.GearChanged(Gear.DRIVE))
+        engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))
+        pass(40, 40)
+        val out = engine.on(NightEvent.GearChanged(Gear.PARK))
+        assertEquals(listOf(2, 1), out.last { it.id == GuidanceId.NIGHT_SUMMARY }.args)
+    }
+
+    @Test
+    fun nightStart_waitsUntilTheDataIsLoaded() {
+        var m = FlashMap.EMPTY
+        engine = NightEngine({ m }, clock)
+        engine.on(NightEvent.LocationChanged(guri.lat, guri.lon))
+        assertTrue(engine.on(NightEvent.GearChanged(Gear.DRIVE)).isEmpty())
+        m = map
+        assertEquals(listOf(GuidanceId.NIGHT_START), ids(engine.tick()))
+    }
 }

@@ -1,5 +1,6 @@
 package com.yahaeng.android.rules
 
+import java.time.Instant
 import java.time.LocalDate
 
 enum class Gear { PARK, REVERSE, NEUTRAL, DRIVE, UNKNOWN }
@@ -17,6 +18,9 @@ sealed interface NightEvent {
 
     data class ZoneEntered(val intersectionId: String, val ring: Ring) : NightEvent
     data class ZoneExited(val intersectionId: String, val ring: Ring) : NightEvent
+
+    /** 근접 알림을 뗐다(재계획에서 빠짐, 등록 오류). 실제로 지난 것이 아니라서 통과 기록을 남기지 않고 상태만 지운다. */
+    data class ZoneDropped(val intersectionId: String) : NightEvent
 
     /** null이면 속도를 읽을 수 없음. */
     data class SpeedChanged(val kmh: Int?) : NightEvent
@@ -73,15 +77,16 @@ data class NightState(
 /**
  * 밤에 바뀌는 규칙을 판단한다(순수 Kotlin, Android import 금지).
  *
- * 1. 점멸 교차로: 바깥 고리에 들어왔을 때 그 교차로가 지금 점멸 중이면 한 번 알린다. 방향지시등에 따라 한 문장을 더한다.
- *    안쪽 고리 안에서 가장 낮은 속도를 기록하고, 서행도 하지 않고 지났으면 차가 멈췄을 때 사실을 한 번 말한다.
- * 2. 비 오는 밤: 와이퍼가 [WIPER_SUSTAIN_MS] 넘게 계속 돌고 내비 제한 속도를 알면 20% 줄인 속도를 계산한다
+ * 1. 점멸 교차로: 바깥 고리(300m) 안에 있는 동안 그 교차로가 점멸 중이고 차가 P가 아니면 한 번 알린다.
+ *    고리에 들어온 뒤에 점멸이 시작되거나 출발해도 그때 알린다. 방향지시등에 따라 한 문장을 더한다.
+ *    안쪽 고리(70m) 안에서 가장 낮은 속도를 기록하고, 서행도 하지 않고 지났으면 차가 멈췄을 때 사실을 한 번 말한다.
+ * 2. 비 오는 밤: 밤에 와이퍼가 [WIPER_SUSTAIN_MS] 넘게 쉬지 않고 돌고 내비 제한 속도를 알면 20% 줄인 속도를 계산한다
  *    (도로교통법 시행규칙 제19조 제2항, 비가 내려 노면이 젖은 경우). 크루즈 목표 속도나 지금 속도가 그보다 높을 때 한 번 말한다.
  *    앱은 실제 노면을 모르므로 "노면이 젖었다면"이라는 조건을 붙여 말한다.
  * 3. 해가 지고 처음 주행할 때 오늘 밤 근처 점멸 교차로 수를 알린다. 정보가 없는 지역이면 없다고 말한다.
- * 4. P에 두면 오늘 밤 지난 점멸 교차로를 사실로 요약한다.
+ * 4. P에 두면 오늘 밤 지난 점멸 교차로를 사실로 요약한다. 기록은 밤 단위(정오~다음 날 정오)로 두고 다음 밤이 되면 지운다.
  *
- * 시간에 따른 판단을 위해 1초마다 [tick]을 부른다.
+ * 시간에 따른 판단을 위해 1초마다 [tick]을 부른다. 음성 대기열이 재생 직전에 [revalidate]로 안내가 아직 맞는지 묻는다.
  */
 class NightEngine(
     private val map: () -> FlashMap,
@@ -96,7 +101,8 @@ class NightEngine(
     private var announcedNight: LocalDate? = null
     private var sunCache: Pair<LocalDate, SunTimes?>? = null
 
-    private class Approach(val enteredAt: Long) {
+    /** 바깥 고리 안에 있는 교차로. 알렸는지와 별개로 실제로 고리 안에 있는 동안 둔다. */
+    private class Approach {
         var announced = false
         val turnsSaid = mutableSetOf<TurnSignal>()
     }
@@ -107,7 +113,10 @@ class NightEngine(
     private val insideMin = mutableMapOf<String, Int?>()
     private val insideActive = mutableSetOf<String>()
 
+    private var session: LocalDate? = null
     private val _passages = mutableListOf<Passage>()
+
+    /** 오늘 밤 기록. */
     val passages: List<Passage> get() = _passages.toList()
     private var summarized = 0
     private var pendingNotice: Passage? = null
@@ -115,6 +124,7 @@ class NightEngine(
     // 비 오는 밤
     private var wiperMode = WiperMode.OFF
     private var wiperMoving = false
+    private var motionOffSince: Long? = null
     private var wipingSince: Long? = null
     private var notWipingSince: Long? = null
     private var limit = 0
@@ -124,6 +134,7 @@ class NightEngine(
     private val rainSaidForLimit = mutableSetOf<Int>()
 
     fun on(event: NightEvent): List<Guidance> {
+        rollSession()
         val out = mutableListOf<Guidance>()
         when (event) {
             is NightEvent.LocationChanged -> {
@@ -152,19 +163,16 @@ class NightEngine(
             }
             is NightEvent.TurnSignalChanged -> {
                 turnSignal = event.signal
-                if (event.signal != TurnSignal.OFF) {
-                    approaches.filterValues { it.announced }.keys.lastOrNull()?.let { id -> sayTurn(id, out) }
-                }
+                if (event.signal != TurnSignal.OFF) announcedApproach()?.let { id -> sayTurn(id, out) }
             }
-            is NightEvent.ZoneEntered -> onEnter(event.intersectionId, event.ring, out)
+            is NightEvent.ZoneEntered -> onEnter(event.intersectionId, event.ring)
             is NightEvent.ZoneExited -> onExit(event.intersectionId, event.ring)
-            is NightEvent.WiperSwitchChanged -> {
-                wiperMode = event.mode
-                updateWiping()
-            }
+            is NightEvent.ZoneDropped -> forget(event.intersectionId)
+            is NightEvent.WiperSwitchChanged -> wiperMode = event.mode
             is NightEvent.WiperMotionChanged -> {
+                if (wiperMoving && !event.moving) motionOffSince = clock.nowMillis()
+                if (event.moving) motionOffSince = null
                 wiperMoving = event.moving
-                updateWiping()
             }
             is NightEvent.CruiseStateChanged -> cruiseActive = event.active
             is NightEvent.CruiseTargetChanged -> cruiseTarget = event.kmh
@@ -173,55 +181,69 @@ class NightEngine(
         return out + tick()
     }
 
-    /** 시간이 지나서 바뀌는 판단(해 짐, 와이퍼 지속, 과속 지속). 1초마다 부른다. */
+    /** 시간이 지나서 바뀌는 판단(점멸 시작과 끝, 해 짐, 와이퍼 지속, 과속 지속). 1초마다 부른다. */
     fun tick(): List<Guidance> {
+        rollSession()
         val out = mutableListOf<Guidance>()
+        refreshApproaches(out)
         checkNightStart(out)
+        updateWiping()
         checkRain(out)
         return out
     }
 
+    /**
+     * 기다리던 안내가 지금도 맞는지. 맞으면 지금 값으로 바꾼 안내를, 더는 맞지 않으면 null을 돌려준다.
+     * 음성 대기열이 재생 직전에 부른다(기다리는 동안 교차로를 벗어나거나 방향, 와이퍼, 제한 속도가 바뀔 수 있다).
+     */
+    fun revalidate(g: Guidance): Guidance? = when (g.id) {
+        GuidanceId.FLASH_AHEAD -> g.takeIf { approaches[g.key]?.announced == true && isFlashing(g.key) }
+        GuidanceId.FLASH_TURN_LEFT -> g.takeIf { approaches.containsKey(g.key) && turnSignal == TurnSignal.LEFT }
+        GuidanceId.FLASH_TURN_RIGHT -> g.takeIf { approaches.containsKey(g.key) && turnSignal == TurnSignal.RIGHT }
+        GuidanceId.RAIN_SPEED, GuidanceId.RAIN_SPEED_CRUISE -> rainGuidance()
+        GuidanceId.FLASH_PASSED_WITHOUT_STOP, GuidanceId.NIGHT_START, GuidanceId.NIGHT_START_NO_DATA, GuidanceId.NIGHT_SUMMARY -> g
+    }
+
     fun state(): NightState {
-        val minute = clock.minuteOfDay()
-        val sun = sun()
         val la = lat
         val lo = lon
         return NightState(
-            night = sun?.isNight(minute) ?: false,
-            sun = sun,
+            night = isNight(),
+            sun = sun(),
             hasLocation = la != null,
             nearbyTonight = if (la != null && lo != null) map().near(la, lo, NEARBY_METERS).size else null,
-            approaching = approaches.filterValues { it.announced }.keys.lastOrNull(),
+            approaching = announcedApproach(),
             wiping = isWipingSustained(),
             speedLimit = limit,
             wetLimit = wetLimit(),
         )
     }
 
+    // ---- 밤 단위 기록 ----
+
+    /** 정오부터 다음 날 정오까지를 한 밤으로 본다. */
+    private fun nightOf(): LocalDate = Instant.ofEpochMilli(clock.nowMillis() - 12 * 3_600_000L).atZone(Clock.KOREA).toLocalDate()
+
+    private fun rollSession() {
+        val night = nightOf()
+        if (session == night) return
+        session = night
+        _passages.clear()
+        summarized = 0
+        pendingNotice = null
+    }
+
     // ---- 점멸 교차로 ----
 
-    private fun onEnter(id: String, ring: Ring, out: MutableList<Guidance>) {
-        val p = map()[id] ?: return
-        val now = clock.nowMillis()
-        val active = p.window.contains(clock.minuteOfDay())
+    private fun isFlashing(id: String): Boolean = map()[id]?.window?.contains(clock.minuteOfDay()) == true
+
+    private fun announcedApproach(): String? = approaches.entries.lastOrNull { it.value.announced }?.key
+
+    private fun onEnter(id: String, ring: Ring) {
+        map()[id] ?: return
         when (ring) {
-            Ring.APPROACH -> {
-                if (!active || gear == Gear.PARK) return
-                val a = Approach(now)
-                // 점멸 교차로가 촘촘한 곳에서 안내가 연달아 나오지 않게 한다. 앞 교차로 안내 고리 안에 있거나
-                // 방금 안내했으면 이번 교차로는 말하지 않는다(통과 기록은 그대로 남긴다)
-                val busy = approaches.values.any { it.announced } || (lastFlashAt?.let { now - it < FLASH_GAP_MS } ?: false)
-                approaches[id] = a
-                val recently = lastAnnounced[id]?.let { now - it < REANNOUNCE_MS } ?: false
-                if (recently || busy) return
-                a.announced = true
-                lastAnnounced[id] = now
-                lastFlashAt = now
-                out += Guidance(GuidanceId.FLASH_AHEAD, key = id)
-                if (turnSignal != TurnSignal.OFF) sayTurn(id, out)
-            }
-            Ring.INSIDE -> {
-                if (!active) return
+            Ring.APPROACH -> if (!approaches.containsKey(id)) approaches[id] = Approach()
+            Ring.INSIDE -> if (isFlashing(id)) {
                 insideActive += id
                 insideMin[id] = speed
             }
@@ -241,6 +263,34 @@ class NightEngine(
         }
     }
 
+    private fun forget(id: String) {
+        approaches.remove(id)
+        insideActive.remove(id)
+        insideMin.remove(id)
+    }
+
+    /**
+     * 고리 안 교차로를 다시 본다. 점멸이 끝난 교차로는 지우고(통과 기록 없이), 아직 알리지 않았는데 지금 알릴 수 있으면 알린다.
+     * 점멸 교차로가 촘촘한 곳에서 안내가 연달아 나오지 않게, 앞 교차로를 알린 고리 안에 있거나 [FLASH_GAP_MS] 안에 알렸으면 기다린다.
+     */
+    private fun refreshApproaches(out: MutableList<Guidance>) {
+        // 고리 안에 있다는 사실은 남기고(점멸이 곧 시작될 수 있다), 점멸이 끝난 교차로는 알린 상태만 푼다
+        approaches.forEach { (key, value) -> if (!isFlashing(key)) value.announced = false }
+        insideActive.filter { !isFlashing(it) }.forEach { insideActive.remove(it); insideMin.remove(it) }
+        if (gear == Gear.PARK || gear == Gear.UNKNOWN) return
+        val now = clock.nowMillis()
+        if (approaches.values.any { it.announced }) return
+        if (lastFlashAt?.let { now - it < FLASH_GAP_MS } == true) return
+        val (id, a) = approaches.entries.firstOrNull { (key, value) ->
+            !value.announced && isFlashing(key) && lastAnnounced[key]?.let { now - it < REANNOUNCE_MS } != true
+        }?.toPair() ?: return
+        a.announced = true
+        lastAnnounced[id] = now
+        lastFlashAt = now
+        out += Guidance(GuidanceId.FLASH_AHEAD, key = id)
+        if (turnSignal != TurnSignal.OFF) sayTurn(id, out)
+    }
+
     private fun sayTurn(id: String, out: MutableList<Guidance>) {
         val a = approaches[id] ?: return
         val signal = turnSignal
@@ -254,11 +304,11 @@ class NightEngine(
         out += Guidance(GuidanceId.FLASH_PASSED_WITHOUT_STOP, listOf(p.minKmh ?: 0), key = p.intersectionId)
     }
 
+    /** 새 기록이 있을 때만 말하고, 숫자는 오늘 밤 전체로 센다. */
     private fun summarize(out: MutableList<Guidance>) {
-        val fresh = _passages.drop(summarized)
-        if (fresh.isEmpty()) return
+        if (_passages.size <= summarized) return
         summarized = _passages.size
-        out += Guidance(GuidanceId.NIGHT_SUMMARY, listOf(fresh.size, fresh.count { it.outcome == Passage.Outcome.STOPPED }))
+        out += Guidance(GuidanceId.NIGHT_SUMMARY, listOf(_passages.size, _passages.count { it.outcome == Passage.Outcome.STOPPED }))
     }
 
     // ---- 해 짐 ----
@@ -271,10 +321,19 @@ class NightEngine(
         return SunTimes.of(date, la, lo).also { sunCache = date to it }
     }
 
+    /** 위치를 모르면 18시~06시를 밤으로 본다(비 오는 밤 안내는 위치 없이도 동작한다). */
+    private fun isNight(): Boolean {
+        val minute = clock.minuteOfDay()
+        return sun()?.isNight(minute) ?: (minute >= 18 * 60 || minute < 6 * 60)
+    }
+
     private fun checkNightStart(out: MutableList<Guidance>) {
         if (gear != Gear.DRIVE) return
         val la = lat ?: return
         val lo = lon ?: return
+        val m = map()
+        // 데이터를 읽어 들이기 전에는 판단하지 않는다(빈 지도로 "정보 없음"을 말하지 않게)
+        if (m.size == 0) return
         val sun = sun() ?: return
         val minute = clock.minuteOfDay()
         if (!sun.isNight(minute)) return
@@ -283,65 +342,71 @@ class NightEngine(
         val night = if (minute < sun.sunriseMinute) today.minusDays(1) else today
         if (announcedNight == night) return
         announcedNight = night
-        val count = map().near(la, lo, NEARBY_METERS).size
+        val count = m.near(la, lo, NEARBY_METERS).size
         out += if (count > 0) Guidance(GuidanceId.NIGHT_START, listOf(count)) else Guidance(GuidanceId.NIGHT_START_NO_DATA)
     }
 
     // ---- 비 오는 밤 ----
 
+    /**
+     * 지금 와이퍼가 돌고 있는지. 간헐, 연속 스위치는 돌고 있는 것으로 본다. 자동은 실제로 움직일 때만인데,
+     * 자동 와이퍼는 닦는 사이에 잠깐 멈추므로 멈춘 지 [AUTO_GAP_MS]가 지나야 멈춘 것으로 본다. 한 번 닦기(MIST)는 비로 보지 않는다.
+     */
+    private fun wipingNow(now: Long): Boolean = when (wiperMode) {
+        WiperMode.INTERMITTENT, WiperMode.CONTINUOUS -> true
+        WiperMode.AUTO, WiperMode.OTHER -> wiperMoving || (motionOffSince?.let { now - it < AUTO_GAP_MS } == true)
+        WiperMode.OFF, WiperMode.MIST -> false
+    }
+
+    /** 연속 작동 시간은 멈추면 처음부터 다시 센다. 2분 넘게 멈추면 비가 그친 것으로 보고 다음 비에 다시 말할 수 있게 한다. */
     private fun updateWiping() {
-        val wiping = when (wiperMode) {
-            WiperMode.INTERMITTENT, WiperMode.CONTINUOUS -> true
-            WiperMode.AUTO -> wiperMoving
-            WiperMode.OFF, WiperMode.MIST, WiperMode.OTHER -> wiperMoving && wiperMode == WiperMode.OTHER
-        }
         val now = clock.nowMillis()
-        if (wiping) {
+        if (wipingNow(now)) {
             notWipingSince = null
             if (wipingSince == null) wipingSince = now
-        } else if (wipingSince != null && notWipingSince == null) {
-            notWipingSince = now
+        } else {
+            wipingSince = null
+            val off = notWipingSince ?: now.also { notWipingSince = it }
+            if (now - off >= WIPER_OFF_RESET_MS) rainSaidForLimit.clear()
         }
     }
 
     private fun isWipingSustained(): Boolean {
         val since = wipingSince ?: return false
-        return notWipingSince == null && clock.nowMillis() - since >= WIPER_SUSTAIN_MS
+        return clock.nowMillis() - since >= WIPER_SUSTAIN_MS
     }
 
-    private fun wetLimit(): Int? = if (isWipingSustained() && limit > 0) limit * 8 / 10 else null
+    private fun wetLimit(): Int? = if (isNight() && isWipingSustained() && limit > 0) limit * 8 / 10 else null
+
+    /** 지금 상황의 비 오는 밤 안내. 조건이 안 되면 null. */
+    private fun rainGuidance(): Guidance? {
+        val wet = wetLimit() ?: return null
+        if (gear != Gear.DRIVE) return null
+        val target = cruiseTarget
+        if (cruiseActive && target != null && target > wet) return Guidance(GuidanceId.RAIN_SPEED_CRUISE, listOf(limit, wet, target))
+        val s = speed
+        if (s != null && s > wet) return Guidance(GuidanceId.RAIN_SPEED, listOf(limit, wet))
+        return null
+    }
 
     private fun checkRain(out: MutableList<Guidance>) {
         val now = clock.nowMillis()
-        // 와이퍼가 한참 멈춰 있으면 비가 그친 것으로 보고 다음 비에 다시 말할 수 있게 한다
-        notWipingSince?.let { off ->
-            if (now - off >= WIPER_OFF_RESET_MS) {
-                wipingSince = null
-                notWipingSince = null
-                rainSaidForLimit.clear()
-            }
-        }
-        val wet = wetLimit()
-        if (wet == null || gear != Gear.DRIVE || limit in rainSaidForLimit) {
+        val g = rainGuidance()
+        if (g == null || limit in rainSaidForLimit) {
             overSince = null
             return
         }
-        val target = cruiseTarget
-        if (cruiseActive && target != null && target > wet) {
+        if (g.id == GuidanceId.RAIN_SPEED_CRUISE) {
             rainSaidForLimit += limit
-            out += Guidance(GuidanceId.RAIN_SPEED_CRUISE, listOf(limit, wet, target))
+            out += g
             return
         }
-        val s = speed
-        if (s != null && s > wet) {
-            val since = overSince ?: now.also { overSince = it }
-            if (now - since >= OVER_SUSTAIN_MS) {
-                rainSaidForLimit += limit
-                overSince = null
-                out += Guidance(GuidanceId.RAIN_SPEED, listOf(limit, wet))
-            }
-        } else {
+        // 지금 속도가 기준보다 높으면 5초 넘게 이어질 때만 말한다(잠깐 넘는 것은 말하지 않는다)
+        val since = overSince ?: now.also { overSince = it }
+        if (now - since >= OVER_SUSTAIN_MS) {
+            rainSaidForLimit += limit
             overSince = null
+            out += g
         }
     }
 
@@ -359,6 +424,7 @@ class NightEngine(
         const val FLASH_GAP_MS = 30_000L
         const val WIPER_SUSTAIN_MS = 10_000L
         const val WIPER_OFF_RESET_MS = 120_000L
+        const val AUTO_GAP_MS = 8_000L
         const val OVER_SUSTAIN_MS = 5_000L
     }
 }

@@ -47,13 +47,16 @@ def column(header, *names):
 
 
 def minutes(text):
-    m = re.match(r"^\s*(\d{1,2}):(\d{2})", text or "")
+    """"HH:MM" 또는 "HH:MM:SS"만 받는다. 뒤에 다른 글자가 붙거나 범위를 벗어나면 None. 24:00은 자정으로 본다."""
+    m = re.fullmatch(r"\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*", text or "")
     if not m:
         return None
-    h, mi = int(m.group(1)), int(m.group(2))
-    if h == 24 and mi == 0:
+    h, mi, sec = int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+    if mi > 59 or sec > 59:
+        return None
+    if h == 24 and mi == 0 and sec == 0:
         h = 0
-    if h > 23 or mi > 59:
+    if h > 23:
         return None
     return h * 60 + mi
 

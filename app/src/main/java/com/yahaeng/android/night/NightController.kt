@@ -77,6 +77,7 @@ class NightController(
     private var lon: Double? = null
     private var plannedAt: Pair<Double, Double>? = null
     private var plannedMinute = -1
+    private var plannedMap: FlashMap? = null
     private var turn = com.yahaeng.android.rules.TurnSignal.OFF
     private var cruiseTarget: Int? = null
     private var job: Job? = null
@@ -85,6 +86,10 @@ class NightController(
     fun start() {
         if (job != null) return
         hub.start()
+        // 기다리던 안내는 재생 직전에 지금도 맞는지 다시 본다(교차로를 벗어났거나 방향, 와이퍼, 제한 속도가 바뀌었을 수 있다)
+        speaker.revalidate = { g, _ ->
+            engine.revalidate(g)?.takeIf { allowedVoice(it) }?.let { it to texts.text(it, map.value) }
+        }
         speaker.start()
         job = scope.launch {
             launch {
@@ -118,16 +123,23 @@ class NightController(
     private fun handle(guidance: List<Guidance>) {
         val s = settings.state.value
         for (g in guidance) {
-            val flash = g.id in FLASH_IDS
-            val rain = g.id == GuidanceId.RAIN_SPEED || g.id == GuidanceId.RAIN_SPEED_CRUISE
-            if (flash && !s.flashVoice) continue
-            if (rain && !s.rain) continue
-            // 안내 종류만 남긴다(위치와 문장 내용은 로그에 남기지 않는다)
-            Log.i(TAG, "say ${g.id}")
-            speaker.say(g, texts.text(g, map.value), KOREAN)
+            // 음성과 팝업은 따로 켜고 끈다
             if (g.id == GuidanceId.FLASH_AHEAD && s.popup && !screenVisible()) {
                 popup?.show(texts.popupTitle(), texts.popupText())
             }
+            if (!allowedVoice(g)) continue
+            // 안내 종류만 남긴다(위치와 문장 내용은 로그에 남기지 않는다)
+            Log.i(TAG, "say ${g.id}")
+            speaker.say(g, texts.text(g, map.value), KOREAN)
+        }
+    }
+
+    private fun allowedVoice(g: Guidance): Boolean {
+        val s = settings.state.value
+        return when (g.id) {
+            in FLASH_IDS -> s.flashVoice
+            GuidanceId.RAIN_SPEED, GuidanceId.RAIN_SPEED_CRUISE -> s.rain
+            else -> true
         }
     }
 
@@ -136,12 +148,15 @@ class NightController(
         val la = lat ?: return
         val lo = lon ?: return
         val minute = clock.minuteOfDay()
+        val m = map.value
         val moved = plannedAt?.let { FlashMap.distanceMeters(it.first, it.second, la, lo) >= ProximityPlanner.REPLAN_METERS } ?: true
         val timeChanged = plannedMinute < 0 || Math.floorMod(minute - plannedMinute, 1440) >= 5
-        if (!moved && !timeChanged) return
+        // 데이터를 다 읽어 들인 직후에도 바로 다시 고른다
+        if (!moved && !timeChanged && plannedMap === m) return
         plannedAt = la to lo
         plannedMinute = minute
-        zones.update(ProximityPlanner.plan(map.value, la, lo, minute))
+        plannedMap = m
+        zones.update(ProximityPlanner.plan(m, la, lo, minute))
     }
 
     private fun publish() {
@@ -153,7 +168,6 @@ class NightController(
         val distance = if (approaching != null && la != null && lo != null) {
             FlashMap.distanceMeters(la, lo, approaching.lat, approaching.lon).toInt()
         } else null
-        val now = clock.nowMillis()
         val regions = if (la != null && lo != null) {
             m.near(la, lo, NightEngine.NEARBY_METERS).groupBy { it.first.region }
                 .map { (region, list) -> RegionInfo(region, list.first().first.baseDate, list.size) }
@@ -167,8 +181,8 @@ class NightController(
             turnLeft = approaching != null && turn == com.yahaeng.android.rules.TurnSignal.LEFT,
             turnRight = approaching != null && turn == com.yahaeng.android.rules.TurnSignal.RIGHT,
             cruiseTarget = cruiseTarget,
-            // 오늘 밤 기록만(18시간 안). 기록은 메모리에만 있어 앱 프로세스가 끝나면 사라진다
-            passages = engine.passages.filter { now - it.atMillis < 18 * 3_600_000L }.reversed(),
+            // 오늘 밤 기록(엔진이 밤 단위로 지운다). 기록은 메모리에만 있어 앱 프로세스가 끝나면 사라진다
+            passages = engine.passages.reversed(),
             regions = regions,
             dataRegions = m.intersections.map { it.region }.distinct().size,
             dataSize = m.size,

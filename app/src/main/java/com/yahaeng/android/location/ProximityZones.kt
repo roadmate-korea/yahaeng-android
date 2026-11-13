@@ -44,10 +44,13 @@ class ProximityZones(context: Context) : DriveSignalSource {
         val wantedKeys = wanted.associateBy { it.key }
         // 빠진 것 떼기
         registered.keys.filter { it !in wantedKeys }.forEach { key ->
-            registered.remove(key)?.let { id ->
+            val id = registered.remove(key)
+            if (id != null) {
                 specByAlertId.remove(id)
                 runCatching { engine.removeProximityAlert(id) }.onFailure { Log.w(TAG, "remove failed: ${it.javaClass.simpleName}") }
             }
+            // 판단 로직에 알려 그 교차로의 상태를 지우게 한다(이탈 이벤트가 더는 오지 않는다)
+            out.tryEmit(RawSignal.Location.ZoneLost(key.substringBefore(':')))
         }
         // 새 것 걸기
         wanted.filter { it.key !in registered }.forEach { spec ->
@@ -87,6 +90,7 @@ class ProximityZones(context: Context) : DriveSignalSource {
         override fun onError(e: Exception) = main.post {
             Log.w(TAG, "proximity error: ${e.javaClass.simpleName}")
             registered.remove(spec.key)
+            out.tryEmit(RawSignal.Location.ZoneLost(spec.intersectionId))
         }.let { }
     }
 
