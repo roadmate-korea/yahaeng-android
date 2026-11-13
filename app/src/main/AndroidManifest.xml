@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Pleos 권한은 App Market과 협의된 범위만 쓴다. 필요한 것만 선언하고 에뮬레이터에서 확인해 줄인다. -->
+
+    <!-- Vehicle SDK: 방향지시등 -->
+    <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
+    <!-- Vehicle SDK: 크루즈 상태와 목표 속도(DrivingMode) -->
+    <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
+    <!-- Vehicle SDK: 와이퍼 -->
+    <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" />
+    <!-- 기어: Android Automotive GEAR_SELECTION. 설치 때 주는 권한 -->
+    <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
+    <!-- 차 속도: PERF_VEHICLE_SPEED. 사용자 허용이 필요하고 정차 중에 한 번 묻는다. 거부하면 멈춤 기록과 속도 비교만 빠진다 -->
+    <uses-permission android:name="android.car.permission.CAR_SPEED" />
+
+    <!-- NaviHelper: 지금 도로 제한 속도 -->
+    <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
+    <!-- TextToSpeech: 음성 안내 -->
+    <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
+    <!-- FusedLocation: 위치와 근접 알림. 위치는 기기 밖으로 보내지 않는다 -->
+    <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
+
+    <!-- 차가 켜질 때 저절로 시작 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 내비를 앞에 둔 채 안내를 계속하는 포그라운드 서비스 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 서비스 알림과 점멸 교차로 알림 팝업 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".YahaengApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Yahaeng">
+        <uses-library
+            android:name="android.car"
+            android:required="false" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <!-- 주행 중에도 화면을 보여 준다. 조작은 앱이 직접 잠근다(P가 아니면 읽기 전용) -->
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".NightService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Spoken night-time road rule guidance (flashing signals, wet-road speed) triggered by location and vehicle signals while navigation is in the foreground" />
+        </service>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
