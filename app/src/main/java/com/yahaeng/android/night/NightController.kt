@@ -128,6 +128,8 @@ class NightController(
                 popup?.show(texts.popupTitle(), texts.popupText())
             }
             if (!allowedVoice(g)) continue
+            // 비 오는 밤 안내는 기다리는 것을 하나만 둔다(제한 속도가 바뀌어 새로 나오면 앞의 것을 버린다)
+            if (g.id in RAIN_IDS) RAIN_IDS.forEach(speaker::drop)
             // 안내 종류만 남긴다(위치와 문장 내용은 로그에 남기지 않는다)
             Log.i(TAG, "say ${g.id}")
             speaker.say(g, texts.text(g, map.value), KOREAN)
@@ -192,6 +194,7 @@ class NightController(
     private companion object {
         const val TAG = "YahaengNight"
         val KOREAN: Locale = Locale.KOREA
+        val RAIN_IDS = setOf(GuidanceId.RAIN_SPEED, GuidanceId.RAIN_SPEED_CRUISE)
         val FLASH_IDS = setOf(GuidanceId.FLASH_AHEAD, GuidanceId.FLASH_TURN_LEFT, GuidanceId.FLASH_TURN_RIGHT, GuidanceId.FLASH_PASSED_WITHOUT_STOP)
     }
 }

@@ -23,25 +23,3 @@ fun Clock.minuteOfDay(): Int {
 }
 
 fun Clock.koreaDate(): LocalDate = Instant.ofEpochMilli(nowMillis()).atZone(Clock.KOREA).toLocalDate()
-
-/**
- * 시연용 시계. [base]에 [offsetMillis]를 더한다. 낮에 찍는 시연 영상에서 "밤 11시 30분"을 재현할 때 쓴다.
- * 판단 로직은 시계가 진짜인지 모른다(시연용 분기 없음).
- */
-class OffsetClock(private val base: Clock = Clock.SYSTEM) : Clock {
-    @Volatile
-    var offsetMillis: Long = 0L
-
-    override fun nowMillis(): Long = base.nowMillis() + offsetMillis
-
-    /** 한국 시간으로 오늘 [minuteOfDay]가 지금이 되도록 맞춘다. */
-    fun setKoreaTime(minuteOfDay: Int) {
-        val now = Instant.ofEpochMilli(base.nowMillis()).atZone(Clock.KOREA)
-        val target = now.toLocalDate().atStartOfDay(Clock.KOREA).plusMinutes(minuteOfDay.toLong())
-        offsetMillis = target.toInstant().toEpochMilli() - now.toInstant().toEpochMilli()
-    }
-
-    fun reset() {
-        offsetMillis = 0L
-    }
-}

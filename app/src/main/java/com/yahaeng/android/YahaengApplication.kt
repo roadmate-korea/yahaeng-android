@@ -15,7 +15,8 @@ import com.yahaeng.android.night.NightController
 import com.yahaeng.android.night.Settings
 import com.yahaeng.android.rules.FlashCsv
 import com.yahaeng.android.rules.FlashMap
-import com.yahaeng.android.rules.OffsetClock
+import com.yahaeng.android.demo.DemoSupport
+import com.yahaeng.android.rules.Clock
 import com.yahaeng.android.vehicle.VehicleGearSource
 import com.yahaeng.android.vehicle.VehicleSignalSource
 import com.yahaeng.android.vehicle.VehicleSpeedSource
@@ -24,8 +25,6 @@ import com.yahaeng.android.voice.PleosTtsEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,8 +36,8 @@ class YahaengApplication : Application() {
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    /** 판단 로직이 쓰는 시계. 디버그 빌드의 시연 입력이 시각을 옮길 수 있다(release는 늘 실제 시각). */
-    val clock = OffsetClock()
+    /** 판단 로직이 쓰는 시계. 디버그 빌드는 시연 입력이 시각을 옮길 수 있고, release는 늘 실제 시각이다. */
+    val clock: Clock = DemoSupport.clock
 
     val settings: Settings by lazy { Settings(this) }
 
@@ -54,15 +53,6 @@ class YahaengApplication : Application() {
     @Volatile
     var screenVisible = false
 
-    /** 디버그 빌드의 시연 입력(제한 속도 등)이 실제 신호와 같은 길로 들어오는 곳. release에서는 비어 있다. */
-    val demoInput = MutableSharedFlow<RawSignal>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-
-    /**
-     * 시연 입력으로 넣은 제한 속도. 에뮬레이터 내비는 제한 속도 0을 계속 보내 시연 값을 덮어쓰므로, 이 값이 있으면
-     * 내비의 제한 속도는 받지 않는다. 디버그 빌드의 시연 입력만 바꾸고 release에서는 늘 null이다.
-     */
-    @Volatile
-    var demoSpeedLimit: Int? = null
 
     private val _flashMap = MutableStateFlow(FlashMap.EMPTY)
     val flashMap: StateFlow<FlashMap> = _flashMap.asStateFlow()
@@ -86,11 +76,12 @@ class YahaengApplication : Application() {
             MergedSignalSource(
                 VehicleGearSource(this),
                 VehicleSignalSource(this),
-                { NaviSignalSource(this).signals().filter { it !is RawSignal.Navi.SpeedLimit || demoSpeedLimit == null } },
+                // 시연 제한 속도가 있으면(디버그 빌드만) 에뮬레이터 내비의 0을 받지 않는다
+                { NaviSignalSource(this).signals().filter { it !is RawSignal.Navi.SpeedLimit || !DemoSupport.overridesSpeedLimit } },
                 VehicleSpeedSource(this, speedPermissionGranted),
                 LocationSignalSource(this, locationPermissionGranted),
                 zones,
-                { demoInput },
+                { DemoSupport.input },
             ),
             appScope,
         )

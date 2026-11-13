@@ -440,4 +440,79 @@ class NightEngineTest {
         m = map
         assertEquals(listOf(GuidanceId.NIGHT_START), ids(engine.tick()))
     }
+
+    // ---- 2차 리뷰 반영 ----
+
+    @Test
+    fun queuedTurnGuidance_isDroppedWhenFlashingEnds() {
+        clock.at(4, 59)
+        drive()
+        engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))
+        val left = engine.on(NightEvent.TurnSignalChanged(TurnSignal.LEFT)).single()
+        clock.at(5, 0)
+        engine.tick()
+        assertNull(engine.revalidate(left))
+    }
+
+    @Test
+    fun alreadyPassedIntersection_isNotAnnouncedLate() {
+        drive()
+        engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))
+        engine.on(NightEvent.ZoneEntered("b", Ring.APPROACH))
+        pass(40, 40)
+        engine.on(NightEvent.ZoneEntered("b", Ring.INSIDE))
+        engine.on(NightEvent.ZoneExited("b", Ring.INSIDE))
+        clock.plus(NightEngine.FLASH_GAP_MS)
+        assertTrue(engine.on(NightEvent.ZoneExited("a", Ring.APPROACH)).none { it.id == GuidanceId.FLASH_AHEAD })
+    }
+
+    @Test
+    fun noticeQueuedAtAStop_waitsForTheNextStopIfTheCarMovesOff() {
+        drive()
+        pass(45, 42, 44)
+        val notice = engine.on(NightEvent.SpeedChanged(0)).single()
+        engine.on(NightEvent.SpeedChanged(40))
+        assertNull("다시 움직이면 지금은 말하지 않는다", engine.revalidate(notice))
+        assertEquals(listOf(GuidanceId.FLASH_PASSED_WITHOUT_STOP), ids(engine.on(NightEvent.SpeedChanged(0))))
+    }
+
+    @Test
+    fun summaryQueuedInPark_isToldAtTheNextParkIfTheCarLeaves() {
+        drive()
+        pass(30, 2, 30)
+        val summary = engine.on(NightEvent.GearChanged(Gear.PARK)).last()
+        engine.on(NightEvent.GearChanged(Gear.DRIVE))
+        assertNull(engine.revalidate(summary))
+        assertEquals(listOf(1, 1), engine.on(NightEvent.GearChanged(Gear.PARK)).last { it.id == GuidanceId.NIGHT_SUMMARY }.args)
+    }
+
+    @Test
+    fun rainRevalidate_needsFiveSecondsAboveTheWetLimit() {
+        rainyDrive()
+        engine.on(NightEvent.CruiseStateChanged(true))
+        engine.on(NightEvent.CruiseTargetChanged(100))
+        clock.plus(10_000)
+        val g = engine.tick().single()
+        engine.on(NightEvent.CruiseStateChanged(false))
+        engine.on(NightEvent.SpeedChanged(100))
+        assertNull("크루즈를 끄고 막 빨라졌으면 아직 말하지 않는다", engine.revalidate(g))
+        clock.plus(NightEngine.OVER_SUSTAIN_MS)
+        engine.tick()
+        assertEquals(GuidanceId.RAIN_SPEED, engine.revalidate(g)?.id)
+    }
+
+    @Test
+    fun waitingInsideBeforeFlashStarts_isRecordedOnceItFlashes() {
+        clock.at(22, 59)
+        drive()
+        engine.on(NightEvent.SpeedChanged(0))
+        engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))
+        engine.on(NightEvent.ZoneEntered("a", Ring.INSIDE))
+        clock.at(23, 0)
+        engine.tick()
+        engine.on(NightEvent.SpeedChanged(40))
+        engine.on(NightEvent.ZoneExited("a", Ring.INSIDE))
+        assertEquals(1, engine.passages.size)
+        assertEquals(0, engine.passages.single().minKmh)
+    }
 }

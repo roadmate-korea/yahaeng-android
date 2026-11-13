@@ -104,6 +104,9 @@ class NightEngine(
     /** 바깥 고리 안에 있는 교차로. 알렸는지와 별개로 실제로 고리 안에 있는 동안 둔다. */
     private class Approach {
         var announced = false
+
+        /** 이번 접근에서 이미 안쪽 고리를 지났다. 뒤늦게 "곧 교차로"라고 말하지 않는다. */
+        var passed = false
         val turnsSaid = mutableSetOf<TurnSignal>()
     }
 
@@ -111,6 +114,11 @@ class NightEngine(
     private val lastAnnounced = mutableMapOf<String, Long>()
     private var lastFlashAt: Long? = null
     private val insideMin = mutableMapOf<String, Int?>()
+
+    /** 안쪽 고리 안에 있는 교차로(점멸 여부와 상관없이). */
+    private val insidePresent = mutableSetOf<String>()
+
+    /** 안쪽 고리 안에서 점멸 중이라 속도를 재고 있는 교차로. */
     private val insideActive = mutableSetOf<String>()
 
     private var session: LocalDate? = null
@@ -119,7 +127,11 @@ class NightEngine(
     /** 오늘 밤 기록. */
     val passages: List<Passage> get() = _passages.toList()
     private var summarized = 0
+    private var summarizedBefore = 0
     private var pendingNotice: Passage? = null
+
+    /** 대기열에 넘긴 사실 안내. 재생 직전에 차가 다시 움직이면 다음 정차 때 다시 말하려고 둔다. */
+    private var queuedNotice: Passage? = null
 
     // 비 오는 밤
     private var wiperMode = WiperMode.OFF
@@ -130,6 +142,7 @@ class NightEngine(
     private var limit = 0
     private var cruiseActive = false
     private var cruiseTarget: Int? = null
+    /** 지금 속도가 젖은 노면 기준보다 높아진 때(낮아지면 null). 안내를 냈는지와 상관없이 잰다. */
     private var overSince: Long? = null
     private val rainSaidForLimit = mutableSetOf<Int>()
 
@@ -198,11 +211,22 @@ class NightEngine(
      */
     fun revalidate(g: Guidance): Guidance? = when (g.id) {
         GuidanceId.FLASH_AHEAD -> g.takeIf { approaches[g.key]?.announced == true && isFlashing(g.key) }
-        GuidanceId.FLASH_TURN_LEFT -> g.takeIf { approaches.containsKey(g.key) && turnSignal == TurnSignal.LEFT }
-        GuidanceId.FLASH_TURN_RIGHT -> g.takeIf { approaches.containsKey(g.key) && turnSignal == TurnSignal.RIGHT }
+        GuidanceId.FLASH_TURN_LEFT -> g.takeIf { approaches.containsKey(g.key) && isFlashing(g.key) && turnSignal == TurnSignal.LEFT }
+        GuidanceId.FLASH_TURN_RIGHT -> g.takeIf { approaches.containsKey(g.key) && isFlashing(g.key) && turnSignal == TurnSignal.RIGHT }
         GuidanceId.RAIN_SPEED, GuidanceId.RAIN_SPEED_CRUISE -> rainGuidance()
-        GuidanceId.FLASH_PASSED_WITHOUT_STOP, GuidanceId.NIGHT_START, GuidanceId.NIGHT_START_NO_DATA, GuidanceId.NIGHT_SUMMARY -> g
+        GuidanceId.FLASH_PASSED_WITHOUT_STOP -> if (stopped()) g else {
+            // 다시 움직이면 지금은 말하지 않고 다음 정차 때 다시 말한다
+            if (pendingNotice == null) pendingNotice = queuedNotice
+            null
+        }
+        GuidanceId.NIGHT_SUMMARY -> if (gear == Gear.PARK) g else {
+            summarized = summarizedBefore
+            null
+        }
+        GuidanceId.NIGHT_START, GuidanceId.NIGHT_START_NO_DATA -> g
     }
+
+    private fun stopped(): Boolean = gear == Gear.PARK || (speed?.let { it <= STOP_KMH } == true)
 
     fun state(): NightState {
         val la = lat
@@ -230,7 +254,9 @@ class NightEngine(
         session = night
         _passages.clear()
         summarized = 0
+        summarizedBefore = 0
         pendingNotice = null
+        queuedNotice = null
     }
 
     // ---- 점멸 교차로 ----
@@ -243,9 +269,12 @@ class NightEngine(
         map()[id] ?: return
         when (ring) {
             Ring.APPROACH -> if (!approaches.containsKey(id)) approaches[id] = Approach()
-            Ring.INSIDE -> if (isFlashing(id)) {
-                insideActive += id
-                insideMin[id] = speed
+            Ring.INSIDE -> {
+                insidePresent += id
+                if (isFlashing(id)) {
+                    insideActive += id
+                    insideMin[id] = speed
+                }
             }
         }
     }
@@ -254,6 +283,8 @@ class NightEngine(
         when (ring) {
             Ring.APPROACH -> approaches.remove(id)
             Ring.INSIDE -> {
+                insidePresent.remove(id)
+                approaches[id]?.passed = true
                 if (!insideActive.remove(id)) return
                 val p = map()[id] ?: return
                 val passage = Passage(id, p.name, clock.nowMillis(), p.window, insideMin.remove(id))
@@ -265,6 +296,7 @@ class NightEngine(
 
     private fun forget(id: String) {
         approaches.remove(id)
+        insidePresent.remove(id)
         insideActive.remove(id)
         insideMin.remove(id)
     }
@@ -277,12 +309,14 @@ class NightEngine(
         // 고리 안에 있다는 사실은 남기고(점멸이 곧 시작될 수 있다), 점멸이 끝난 교차로는 알린 상태만 푼다
         approaches.forEach { (key, value) -> if (!isFlashing(key)) value.announced = false }
         insideActive.filter { !isFlashing(it) }.forEach { insideActive.remove(it); insideMin.remove(it) }
+        // 안쪽 고리 안에서 기다리는 동안 점멸이 시작되면 그때부터 잰다
+        insidePresent.filter { isFlashing(it) && it !in insideActive }.forEach { insideActive += it; insideMin[it] = speed }
         if (gear == Gear.PARK || gear == Gear.UNKNOWN) return
         val now = clock.nowMillis()
         if (approaches.values.any { it.announced }) return
         if (lastFlashAt?.let { now - it < FLASH_GAP_MS } == true) return
         val (id, a) = approaches.entries.firstOrNull { (key, value) ->
-            !value.announced && isFlashing(key) && lastAnnounced[key]?.let { now - it < REANNOUNCE_MS } != true
+            !value.announced && !value.passed && isFlashing(key) && lastAnnounced[key]?.let { now - it < REANNOUNCE_MS } != true
         }?.toPair() ?: return
         a.announced = true
         lastAnnounced[id] = now
@@ -301,12 +335,14 @@ class NightEngine(
     private fun deliverNotice(out: MutableList<Guidance>) {
         val p = pendingNotice ?: return
         pendingNotice = null
+        queuedNotice = p
         out += Guidance(GuidanceId.FLASH_PASSED_WITHOUT_STOP, listOf(p.minKmh ?: 0), key = p.intersectionId)
     }
 
     /** 새 기록이 있을 때만 말하고, 숫자는 오늘 밤 전체로 센다. */
     private fun summarize(out: MutableList<Guidance>) {
         if (_passages.size <= summarized) return
+        summarizedBefore = summarized
         summarized = _passages.size
         out += Guidance(GuidanceId.NIGHT_SUMMARY, listOf(_passages.size, _passages.count { it.outcome == Passage.Outcome.STOPPED }))
     }
@@ -384,30 +420,21 @@ class NightEngine(
         if (gear != Gear.DRIVE) return null
         val target = cruiseTarget
         if (cruiseActive && target != null && target > wet) return Guidance(GuidanceId.RAIN_SPEED_CRUISE, listOf(limit, wet, target))
-        val s = speed
-        if (s != null && s > wet) return Guidance(GuidanceId.RAIN_SPEED, listOf(limit, wet))
+        // 지금 속도가 기준보다 높은 상태가 [OVER_SUSTAIN_MS] 넘게 이어질 때만(잠깐 넘는 것은 말하지 않는다)
+        val since = overSince ?: return null
+        if (clock.nowMillis() - since >= OVER_SUSTAIN_MS) return Guidance(GuidanceId.RAIN_SPEED, listOf(limit, wet))
         return null
     }
 
     private fun checkRain(out: MutableList<Guidance>) {
         val now = clock.nowMillis()
-        val g = rainGuidance()
-        if (g == null || limit in rainSaidForLimit) {
-            overSince = null
-            return
-        }
-        if (g.id == GuidanceId.RAIN_SPEED_CRUISE) {
-            rainSaidForLimit += limit
-            out += g
-            return
-        }
-        // 지금 속도가 기준보다 높으면 5초 넘게 이어질 때만 말한다(잠깐 넘는 것은 말하지 않는다)
-        val since = overSince ?: now.also { overSince = it }
-        if (now - since >= OVER_SUSTAIN_MS) {
-            rainSaidForLimit += limit
-            overSince = null
-            out += g
-        }
+        val wet = wetLimit()
+        val s = speed
+        overSince = if (wet != null && gear == Gear.DRIVE && s != null && s > wet) (overSince ?: now) else null
+        if (limit in rainSaidForLimit) return
+        val g = rainGuidance() ?: return
+        rainSaidForLimit += limit
+        out += g
     }
 
     companion object {
