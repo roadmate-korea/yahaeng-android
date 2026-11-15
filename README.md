@@ -74,7 +74,14 @@ python3 -I -m unittest discover -s tools/crosswalks   # 변환 도구 테스트
 ./gradlew assembleRelease     # 제출용(디버그 키로 서명)
 ```
 
-Pleos Connect 에뮬레이터 2.1.0(API 34)에서 확인했습니다. 앱은 사용자 10에서 돕니다.
+제출 APK는 [apk/로드메이트_야행_release.apk](apk/)입니다(release 빌드, 디버그 키 서명). 설치는 다음과 같습니다.
+
+```bash
+adb install -r apk/로드메이트_야행_release.apk
+# 처음 한 번 P에서 앱을 열어 위치와 차 속도 권한을 허용하면, 그 뒤로는 차가 켜질 때 저절로 시작됩니다
+```
+
+테스트 환경: Pleos Connect 에뮬레이터 2.1.0(API 34), Virtual Console. 앱은 사용자 10에서 돕니다. minSdk 28, targetSdk 35.
 
 ## 시연 방법
 
