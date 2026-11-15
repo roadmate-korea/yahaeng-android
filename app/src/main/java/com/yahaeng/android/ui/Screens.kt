@@ -74,13 +74,14 @@ private fun Badge(text: String, color: Color) {
     }
 }
 
-/** 머리글: 달 아이콘, 앱 이름, 상태, 주행 중이면 잠금 배지. */
+/** 머리글: 달 아이콘, 앱 이름, 상태, 주행 중이면 잠금 배지, 시연 중이면 시연 배지. */
 @Composable
-fun AppHeader(status: String, locked: Boolean) {
+fun AppHeader(status: String, locked: Boolean, demo: Boolean = false) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Icon(painterResource(R.drawable.ic_moon), null, tint = Night.moon, modifier = Modifier.size(36.dp))
         T(stringResource(R.string.app_name), NightType.title)
         T(status, NightType.caption, Night.sub, Modifier.weight(1f))
+        if (demo) Badge(stringResource(R.string.demo_badge), Night.yellow)
         if (locked) Badge(stringResource(R.string.locked_badge), Night.sub)
     }
 }
@@ -159,8 +160,17 @@ fun OnboardingScreen(parked: Boolean, dataRegions: Int, dataSize: Int, onStart: 
 
 private fun hhmm(minute: Int) = "%02d:%02d".format(minute / 60, minute % 60)
 
+/**
+ * 주행 화면. [onDemoStart]와 [onDemoStop]은 정차(P) 화면에서만 넘긴다(주행 중에는 시연 버튼을 보이지 않는다).
+ */
 @Composable
-fun DrivePanel(ui: NightUi, caption: GuidanceSpeaker.Caption?, modifier: Modifier = Modifier) {
+fun DrivePanel(
+    ui: NightUi,
+    caption: GuidanceSpeaker.Caption?,
+    modifier: Modifier = Modifier,
+    onDemoStart: (() -> Unit)? = null,
+    onDemoStop: (() -> Unit)? = null,
+) {
     val e = ui.engine
     val status = when {
         ui.approaching != null || ui.crosswalk != null -> stringResource(R.string.status_night)
@@ -170,7 +180,7 @@ fun DrivePanel(ui: NightUi, caption: GuidanceSpeaker.Caption?, modifier: Modifie
         else -> stringResource(R.string.status_day)
     }
     Column(modifier.fillMaxSize().background(Night.bg).padding(48.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
-        AppHeader(status, ui.vehicle.locked)
+        AppHeader(status, ui.vehicle.locked, ui.demo)
         if (ui.vehicle.error) T(stringResource(R.string.vehicle_unavailable), NightType.caption, Night.red)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(28.dp)) {
             when {
@@ -180,7 +190,21 @@ fun DrivePanel(ui: NightUi, caption: GuidanceSpeaker.Caption?, modifier: Modifie
                 else -> StandbyContent(ui)
             }
         }
+        if (!ui.vehicle.locked) DemoButton(ui.demo, onDemoStart, onDemoStop)
         CaptionBar(caption)
+    }
+}
+
+/** 정차 중 시연 재생 버튼. 시연 중이면 끝내기 버튼. */
+@Composable
+private fun DemoButton(demo: Boolean, onStart: (() -> Unit)?, onStop: (() -> Unit)?) {
+    val action = (if (demo) onStop else onStart) ?: return
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+        Box(
+            Modifier.clip(CircleShape).background(if (demo) Night.raised else Night.moon).clickable(onClick = action)
+                .padding(horizontal = 36.dp, vertical = 20.dp),
+        ) { T(stringResource(if (demo) R.string.demo_stop else R.string.demo_start), NightType.body, if (demo) Night.text else Night.bg) }
+        T(stringResource(if (demo) R.string.demo_running_desc else R.string.demo_desc), NightType.caption, Night.sub, Modifier.weight(1f))
     }
 }
 
@@ -267,7 +291,14 @@ private fun ColumnScope.RainContent(ui: NightUi) {
 // ---------------- 정차 중(P) 화면 ----------------
 
 @Composable
-fun ParkedScreen(ui: NightUi, caption: GuidanceSpeaker.Caption?, settings: SettingsState, onSettings: ((SettingsState) -> SettingsState) -> Unit) {
+fun ParkedScreen(
+    ui: NightUi,
+    caption: GuidanceSpeaker.Caption?,
+    settings: SettingsState,
+    onSettings: ((SettingsState) -> SettingsState) -> Unit,
+    onDemoStart: () -> Unit = {},
+    onDemoStop: () -> Unit = {},
+) {
     var tab by remember { mutableIntStateOf(0) }
     BoxWithConstraints(Modifier.fillMaxSize().background(Night.bg)) {
         val wide = maxWidth >= 1200.dp
@@ -281,8 +312,15 @@ fun ParkedScreen(ui: NightUi, caption: GuidanceSpeaker.Caption?, settings: Setti
                     ) { T(stringResource(res), NightType.body, if (on) Night.bg else Night.text) }
                 }
             }
+            // 시연 중에는 어느 탭에서든 시연 표시와 끝내기 버튼을 보인다(기록과 데이터 탭의 내용도 시연 것이다)
+            if (ui.demo && tab != 0) {
+                Row(Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    Badge(stringResource(R.string.demo_badge), Night.yellow)
+                    DemoButton(demo = true, onStart = null, onStop = onDemoStop)
+                }
+            }
             when (tab) {
-                0 -> DrivePanel(ui, caption, Modifier.widthIn(max = 900.dp))
+                0 -> DrivePanel(ui, caption, Modifier.widthIn(max = 900.dp), onDemoStart, onDemoStop)
                 1 -> RecordsScreen(ui)
                 else -> DataSettingsScreen(ui, settings, onSettings, wide = wide)
             }

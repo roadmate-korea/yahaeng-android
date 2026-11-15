@@ -75,6 +75,13 @@
     <string name="cruise_ok">기준 안이에요</string>
     <string name="rain_note">가변 속도 표지가 있으면 표지를 따르세요. 앱은 노면을 직접 볼 수 없어 와이퍼가 계속 도는지로 판단합니다.</string>
 
+    <!-- 시연 재생(정차 중에만) -->
+    <string name="demo_start">시연 재생: 구리시 밤길</string>
+    <string name="demo_stop">시연 끝내기</string>
+    <string name="demo_badge">시연 중</string>
+    <string name="demo_desc">23:30 구리시 장자대로 89로 가는 길을 실제 판단 로직으로 1분 반 동안 재생합니다. 실제 기록과 설정은 바꾸지 않습니다.</string>
+    <string name="demo_running_desc">화면과 기록은 시연 것입니다. 끝나면 원래대로 돌아갑니다.</string>
+
     <!-- 정차 중 화면 -->
     <string name="tab_now">지금</string>
     <string name="tab_records">오늘 밤 기록</string>
