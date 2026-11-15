@@ -22,13 +22,13 @@ captures/
 *.hprof
 local.properties
 
-# 빌드 산출 APK/AAB는 올리지 않는다. 제출용 APK만 dist/에 둔다
+# 빌드 산출 APK/AAB는 올리지 않는다. 제출용 APK만 apk/에 둔다
 *.apk
 *.aab
 *.ap_
 *.dex
 output-metadata.json
-!dist/*.apk
+!apk/*.apk
 
 # ---- IDE ----
 .idea/
@@ -53,3 +53,6 @@ Thumbs.db
 *.tmp
 *.swp
 *~
+
+# ---- Python ----
+__pycache__/
