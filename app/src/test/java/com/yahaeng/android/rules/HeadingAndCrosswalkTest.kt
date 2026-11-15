@@ -328,6 +328,29 @@ class HeadingAndCrosswalkTest {
     }
 
     @Test
+    fun crossing_isRecordedAgain_whenTheCarComesBackWithin10Minutes() {
+        startDriving(40)
+        driveNorth(cw.lat, cw.lon, -200, 200)
+        clock.plus(60_000)
+        engine.on(NightEvent.SpeedChanged(25))
+        (200 downTo -200 step 10).forEach { moveTo(cw.lat, cw.lon, it.toDouble()) }
+        assertEquals(listOf(40, 25), engine.crossings.map { it.minKmh })
+    }
+
+    @Test
+    fun crossing_countsTheSpeedAtTheMomentOfReentering() {
+        startDriving(31)
+        moveTo(cw.lat, cw.lon, -60.0)
+        moveTo(cw.lat, cw.lon, -29.0)
+        moveTo(cw.lat, cw.lon, -31.0)
+        engine.on(NightEvent.SpeedChanged(30))
+        moveTo(cw.lat, cw.lon, -29.0)
+        engine.on(NightEvent.SpeedChanged(31))
+        driveNorth(cw.lat, cw.lon, -20, 60)
+        assertEquals(30, engine.crossings.single().minKmh)
+    }
+
+    @Test
     fun crosswalkCsv_parsesTheAssetFormat() {
         val m = CrosswalkCsv.parse(
             sequenceOf(

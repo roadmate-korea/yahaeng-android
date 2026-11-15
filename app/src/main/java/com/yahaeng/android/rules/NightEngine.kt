@@ -136,7 +136,8 @@ class NightEngine(
     private class CrossingTrack(var minKmh: Int?, var within: Boolean)
 
     private val crossingTracks = linkedMapOf<String, CrossingTrack>()
-    private val crossedAt = mutableMapOf<String, Long>()
+    /** 기록을 마친 뒤 아직 [RECROSS_CLEAR_METERS] 밖으로 나가지 않은 횡단보도. 위치가 흔들려 다시 들어와도 한 번 더 기록하지 않는다. */
+    private val justCrossed = mutableSetOf<String>()
     private val _crossings = mutableListOf<Crossing>()
 
     /** 오늘 밤 지난 어두운 횡단보도. */
@@ -480,18 +481,22 @@ class NightEngine(
                 continue
             }
             val d = Geo.distanceMeters(la, lo, c.lat, c.lon)
-            t.within = d <= CROSSWALK_INSIDE_METERS
+            val within = d <= CROSSWALK_INSIDE_METERS
+            // 30m 밖에 나갔다가 다시 들어오면 그 순간의 속도도 넣는다
+            if (within && !t.within) speed?.let { v -> t.minKmh = t.minKmh?.let { minOf(it, v) } ?: v }
+            t.within = within
             if (d > CROSSWALK_INSIDE_METERS + EXIT_MARGIN_METERS) {
                 _crossings += Crossing(id, c.road, now, t.minKmh)
-                crossedAt[id] = now
+                justCrossed += id
                 if (crosswalk == id) crosswalkPassed = true
                 iter.remove()
             }
         }
+        // 충분히 멀어진 뒤 다시 오면 새로 지나는 것으로 본다(10분 안이어도)
+        justCrossed.removeAll { id -> cm[id]?.let { Geo.distanceMeters(la, lo, it.lat, it.lon) > RECROSS_CLEAR_METERS } ?: true }
         if (gear == Gear.PARK || gear == Gear.UNKNOWN || !isNight()) return
         cm.near(la, lo, CROSSWALK_INSIDE_METERS).forEach { (c, _) ->
-            // 위치가 흔들려 다시 들어온 것으로 보이면 한 번 더 기록하지 않는다
-            if (c.id !in crossingTracks && crossedAt[c.id]?.let { now - it < REANNOUNCE_MS } != true) {
+            if (c.id !in crossingTracks && c.id !in justCrossed) {
                 crossingTracks[c.id] = CrossingTrack(speed, within = true)
             }
         }
@@ -617,5 +622,8 @@ class NightEngine(
 
         /** 고리를 나갔다고 보기 전에 더 멀어져야 하는 거리(위치 흔들림 때문). */
         const val EXIT_MARGIN_METERS = 10.0
+
+        /** 기록한 횡단보도에서 이만큼 멀어져야 다음에 다시 지날 때 새로 기록한다. */
+        const val RECROSS_CLEAR_METERS = 100.0
     }
 }
