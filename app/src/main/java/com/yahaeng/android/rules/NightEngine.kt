@@ -59,7 +59,7 @@ data class Passage(
         }
 }
 
-/** 안내한 어두운 횡단보도를 지난 사실 한 건. 점수가 아니라 기록이다. */
+/** 밤에 어두운 횡단보도를 지난 사실 한 건(안내했는지와 상관없이). 점수가 아니라 기록이다. */
 data class Crossing(
     val crosswalkId: String,
     val road: String,
@@ -130,9 +130,13 @@ class NightEngine(
 
     /** 안내한 뒤 아직 고리 안에 있는 횡단보도. 한 번에 하나만 둔다(고리 안에서는 다른 횡단보도를 말하지 않는다). */
     private var crosswalk: String? = null
-    private var crosswalkInside = false
     private var crosswalkPassed = false
-    private var crosswalkMin: Int? = null
+
+    /** 지금 지나는 중인 횡단보도(안내와 상관없이). [within]일 때만 속도를 잰다. */
+    private class CrossingTrack(var minKmh: Int?, var within: Boolean)
+
+    private val crossingTracks = linkedMapOf<String, CrossingTrack>()
+    private val crossedAt = mutableMapOf<String, Long>()
     private val _crossings = mutableListOf<Crossing>()
 
     /** 오늘 밤 지난 어두운 횡단보도. */
@@ -211,12 +215,12 @@ class NightEngine(
                         else -> minOf(prev, now)
                     }
                 }
-                if (crosswalkInside && event.kmh != null) crosswalkMin = crosswalkMin?.let { minOf(it, event.kmh) } ?: event.kmh
+                if (event.kmh != null) crossingTracks.values.filter { it.within }.forEach { t -> t.minKmh = t.minKmh?.let { minOf(it, event.kmh) } ?: event.kmh }
                 if (event.kmh != null && event.kmh <= STOP_KMH && insideActive.isEmpty()) deliverNotice(out)
             }
             is NightEvent.TurnSignalChanged -> {
                 turnSignal = event.signal
-                if (event.signal != TurnSignal.OFF) announcedApproach()?.let { id -> sayTurn(id, out) }
+                if (event.signal != TurnSignal.OFF) announcedApproach()?.takeIf { isAhead(intersectionPoint(it)) }?.let { id -> sayTurn(id, out) }
             }
             is NightEvent.ZoneEntered -> onEnter(event.intersectionId, event.ring)
             is NightEvent.ZoneExited -> onExit(event.intersectionId, event.ring)
@@ -253,20 +257,17 @@ class NightEngine(
     fun revalidate(g: Guidance): Guidance? = when (g.id) {
         GuidanceId.FLASH_AHEAD -> when {
             approaches[g.key]?.announced != true || !isFlashing(g.key) -> null
-            !isAhead(map()[g.key]?.let { it.lat to it.lon }) -> {
-                // 기다리는 동안 방향을 틀어 교차로가 뒤나 옆이 됐다. 다시 앞쪽이 되면 그때 알린다
-                approaches[g.key]?.announced = false
+            !isAhead(intersectionPoint(g.key)) -> {
+                // 기다리는 동안 방향을 틀어 교차로가 뒤나 옆이 됐다. 다시 앞쪽이 되면 그때 알린다(방향지시등 문장도 그때 다시)
+                approaches[g.key]?.let { it.announced = false; it.turnsSaid.clear() }
                 lastAnnounced.remove(g.key)
                 null
             }
             else -> g
         }
-        GuidanceId.DARK_CROSSWALK -> g.takeIf {
-            crosswalk == g.key && !crosswalkInside && !crosswalkPassed && isNight() &&
-                isAhead(crosswalks()[g.key]?.let { it.lat to it.lon }, whenUnknown = false)
-        }
-        GuidanceId.FLASH_TURN_LEFT -> g.takeIf { approaches.containsKey(g.key) && isFlashing(g.key) && turnSignal == TurnSignal.LEFT }
-        GuidanceId.FLASH_TURN_RIGHT -> g.takeIf { approaches.containsKey(g.key) && isFlashing(g.key) && turnSignal == TurnSignal.RIGHT }
+        GuidanceId.DARK_CROSSWALK -> g.takeIf { crosswalkStillValid(g.key) }
+        GuidanceId.FLASH_TURN_LEFT -> g.takeIf { turnStillValid(g.key, TurnSignal.LEFT) }
+        GuidanceId.FLASH_TURN_RIGHT -> g.takeIf { turnStillValid(g.key, TurnSignal.RIGHT) }
         GuidanceId.RAIN_SPEED, GuidanceId.RAIN_SPEED_CRUISE -> rainGuidance()
         GuidanceId.FLASH_PASSED_WITHOUT_STOP -> if (stopped()) g else {
             // 다시 움직이면 지금은 말하지 않고 다음 정차 때 다시 말한다
@@ -279,6 +280,23 @@ class NightEngine(
         }
         GuidanceId.NIGHT_START -> g
     }
+
+    /** 방향지시등 문장은 그 교차로를 알린 상태이고, 아직 점멸 중이고, 아직 앞쪽이고, 같은 방향일 때만. */
+    private fun turnStillValid(id: String, signal: TurnSignal): Boolean =
+        approaches[id]?.announced == true && isFlashing(id) && turnSignal == signal && isAhead(intersectionPoint(id))
+
+    /** 기다리던 횡단보도 안내가 지금도 맞는지. 만들 때의 조건을 다시 보고, 그 뒤에 점멸 교차로를 알렸으면 버린다. */
+    private fun crosswalkStillValid(id: String): Boolean {
+        if (crosswalk != id || crosswalkPassed || id in crossingTracks || !isNight()) return false
+        if (gear == Gear.PARK || gear == Gear.UNKNOWN) return false
+        if ((speed ?: return false) <= CROSSWALK_MIN_KMH) return false
+        if (approaches.values.any { it.announced }) return false
+        val saidAt = crosswalkSaidAt[id] ?: return false
+        if (lastFlashAt?.let { it >= saidAt } == true) return false
+        return isAhead(crosswalks()[id]?.let { it.lat to it.lon }, whenUnknown = false)
+    }
+
+    private fun intersectionPoint(id: String): Pair<Double, Double>? = map()[id]?.let { it.lat to it.lon }
 
     private fun stopped(): Boolean = gear == Gear.PARK || (speed?.let { it <= STOP_KMH } == true)
 
@@ -372,7 +390,7 @@ class NightEngine(
         if (lastFlashAt?.let { now - it < FLASH_GAP_MS } == true) return
         val (id, a) = approaches.entries.firstOrNull { (key, value) ->
             !value.announced && !value.passed && isFlashing(key) && lastAnnounced[key]?.let { now - it < REANNOUNCE_MS } != true &&
-                isAhead(map()[key]?.let { it.lat to it.lon })
+                isAhead(intersectionPoint(key))
         }?.toPair() ?: return
         a.announced = true
         lastAnnounced[id] = now
@@ -421,11 +439,12 @@ class NightEngine(
 
     // ---- 어두운 횡단보도 ----
 
-    /** 안내한 횡단보도를 따라가며 기록하고, 지금 알릴 횡단보도가 있으면 알린다. */
+    /** 지나는 횡단보도를 기록하고, 안내한 횡단보도를 따라가고, 지금 알릴 횡단보도가 있으면 알린다. */
     private fun refreshCrosswalk(out: MutableList<Guidance>) {
         val la = lat ?: return
         val lo = lon ?: return
         val cm = crosswalks()
+        trackCrossings(cm, la, lo)
         crosswalk?.let { id -> followCrosswalk(id, cm, la, lo) }
         if (crosswalk != null || cm.size == 0) return
         if (gear == Gear.PARK || gear == Gear.UNKNOWN || !isNight()) return
@@ -436,38 +455,55 @@ class NightEngine(
         val now = clock.nowMillis()
         if (listOfNotNull(lastFlashAt, lastCrosswalkAt).any { now - it < FLASH_GAP_MS }) return
         val (c, _) = cm.near(la, lo, CROSSWALK_RING_METERS).firstOrNull { (c, d) ->
-            d > CROSSWALK_INSIDE_METERS && crosswalkSaidAt[c.id]?.let { now - it < REANNOUNCE_MS } != true &&
+            d > CROSSWALK_INSIDE_METERS && c.id !in crossingTracks && crosswalkSaidAt[c.id]?.let { now - it < REANNOUNCE_MS } != true &&
                 isAhead(c.lat to c.lon, whenUnknown = false)
         } ?: return
         crosswalk = c.id
-        crosswalkInside = false
         crosswalkPassed = false
-        crosswalkMin = null
         crosswalkSaidAt[c.id] = now
         lastCrosswalkAt = now
         out += Guidance(GuidanceId.DARK_CROSSWALK, key = c.id)
     }
 
-    private fun followCrosswalk(id: String, cm: CrosswalkMap, la: Double, lo: Double) {
-        val c = cm[id] ?: return clearCrosswalk()
-        val d = Geo.distanceMeters(la, lo, c.lat, c.lon)
-        if (!crosswalkPassed && d <= CROSSWALK_INSIDE_METERS) {
-            if (!crosswalkInside) crosswalkMin = speed
-            crosswalkInside = true
-        } else if (crosswalkInside && d > CROSSWALK_INSIDE_METERS + EXIT_MARGIN_METERS) {
-            _crossings += Crossing(id, c.road, clock.nowMillis(), crosswalkMin)
-            crosswalkInside = false
-            crosswalkPassed = true
+    /**
+     * 밤에 어두운 횡단보도 [CROSSWALK_INSIDE_METERS] 안에 들어가면 속도를 재기 시작하고, [EXIT_MARGIN_METERS]만큼 더 멀어지면 기록한다.
+     * 속도는 30m 안에 있을 때만 잰다(기록을 확정하는 여유 거리 안에서 줄인 속도는 넣지 않는다). 안내했는지와 상관없이 기록한다.
+     */
+    private fun trackCrossings(cm: CrosswalkMap, la: Double, lo: Double) {
+        val now = clock.nowMillis()
+        val iter = crossingTracks.entries.iterator()
+        while (iter.hasNext()) {
+            val (id, t) = iter.next()
+            val c = cm[id]
+            if (c == null) {
+                iter.remove()
+                continue
+            }
+            val d = Geo.distanceMeters(la, lo, c.lat, c.lon)
+            t.within = d <= CROSSWALK_INSIDE_METERS
+            if (d > CROSSWALK_INSIDE_METERS + EXIT_MARGIN_METERS) {
+                _crossings += Crossing(id, c.road, now, t.minKmh)
+                crossedAt[id] = now
+                if (crosswalk == id) crosswalkPassed = true
+                iter.remove()
+            }
         }
-        // 고리를 벗어나면 끝(지나지 않고 다른 길로 빠졌으면 기록하지 않는다)
-        if (d > CROSSWALK_RING_METERS + EXIT_MARGIN_METERS) clearCrosswalk()
+        if (gear == Gear.PARK || gear == Gear.UNKNOWN || !isNight()) return
+        cm.near(la, lo, CROSSWALK_INSIDE_METERS).forEach { (c, _) ->
+            // 위치가 흔들려 다시 들어온 것으로 보이면 한 번 더 기록하지 않는다
+            if (c.id !in crossingTracks && crossedAt[c.id]?.let { now - it < REANNOUNCE_MS } != true) {
+                crossingTracks[c.id] = CrossingTrack(speed, within = true)
+            }
+        }
     }
 
-    private fun clearCrosswalk() {
-        crosswalk = null
-        crosswalkInside = false
-        crosswalkPassed = false
-        crosswalkMin = null
+    /** 안내한 횡단보도의 고리를 벗어나면 끝낸다(지나지 않고 다른 길로 빠졌으면 기록도 없다). */
+    private fun followCrosswalk(id: String, cm: CrosswalkMap, la: Double, lo: Double) {
+        val c = cm[id]
+        if (c == null || Geo.distanceMeters(la, lo, c.lat, c.lon) > CROSSWALK_RING_METERS + EXIT_MARGIN_METERS) {
+            crosswalk = null
+            crosswalkPassed = false
+        }
     }
 
     // ---- 해 짐 ----

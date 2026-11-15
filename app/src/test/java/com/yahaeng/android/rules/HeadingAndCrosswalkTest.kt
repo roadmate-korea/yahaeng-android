@@ -241,6 +241,92 @@ class HeadingAndCrosswalkTest {
         assertTrue(engine.crossings.isEmpty())
     }
 
+    // ---- 3차 리뷰 반영 ----
+
+    @Test
+    fun queuedTurnGuidance_isDropped_whenTheCarTurnsAway() {
+        startDriving(40)
+        engine.on(NightEvent.TurnSignalChanged(TurnSignal.LEFT))
+        driveNorth(flash.lat, flash.lon, -300, -260)
+        val out = engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))
+        val left = out.first { it.id == GuidanceId.FLASH_TURN_LEFT }
+        // 재생 전에 동쪽으로 틀어 교차로가 옆이 된다
+        listOf(20, 40, 60).forEach { moveTo(flash.lat, flash.lon, -260.0, it.toDouble()) }
+        assertNull(engine.revalidate(out.first { it.id == GuidanceId.FLASH_AHEAD }))
+        assertNull(engine.revalidate(left))
+    }
+
+    @Test
+    fun turnSignal_isSilent_forAnAnnouncedIntersectionThatIsNoLongerAhead() {
+        startDriving(40)
+        driveNorth(flash.lat, flash.lon, -300, -260)
+        assertTrue(ids(engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))).contains(GuidanceId.FLASH_AHEAD))
+        listOf(20, 40, 60).forEach { moveTo(flash.lat, flash.lon, -260.0, it.toDouble()) }
+        assertTrue(engine.on(NightEvent.TurnSignalChanged(TurnSignal.RIGHT)).none { it.id == GuidanceId.FLASH_TURN_RIGHT })
+    }
+
+    @Test
+    fun queuedCrosswalk_isDropped_whenTheCarSlowsDownOrParks() {
+        startDriving(40)
+        val g = driveNorth(cw.lat, cw.lon, -300, -120).first { it.id == GuidanceId.DARK_CROSSWALK }
+        engine.on(NightEvent.SpeedChanged(25))
+        assertNull(engine.revalidate(g))
+        engine.on(NightEvent.SpeedChanged(40))
+        assertEquals(g, engine.revalidate(g))
+        engine.on(NightEvent.SpeedChanged(null))
+        assertNull("속도를 모르면 말하지 않는다", engine.revalidate(g))
+        engine.on(NightEvent.SpeedChanged(40))
+        engine.on(NightEvent.GearChanged(Gear.PARK))
+        assertNull(engine.revalidate(g))
+    }
+
+    @Test
+    fun queuedCrosswalk_isDropped_whenAFlashIntersectionIsAnnouncedAfterIt() {
+        crosswalkMap = CrosswalkMap(listOf(cw.copy(lat = flash.lat - 150 / M_PER_DEG_LAT, lon = flash.lon)))
+        startDriving(40)
+        val g = driveNorth(flash.lat, flash.lon, -400, -290).first { it.id == GuidanceId.DARK_CROSSWALK }
+        assertTrue(ids(engine.on(NightEvent.ZoneEntered("a", Ring.APPROACH))).contains(GuidanceId.FLASH_AHEAD))
+        assertNull(engine.revalidate(g))
+    }
+
+    @Test
+    fun crossing_ignoresSlowingBetween30And40m() {
+        startDriving(45)
+        driveNorth(cw.lat, cw.lon, -300, 20)
+        moveTo(cw.lat, cw.lon, 35.0)
+        engine.on(NightEvent.SpeedChanged(20))
+        moveTo(cw.lat, cw.lon, 50.0)
+        val c = engine.crossings.single()
+        assertEquals(45, c.minKmh)
+        assertEquals(Crossing.Outcome.PASSED, c.outcome)
+    }
+
+    @Test
+    fun crossing_isRecorded_evenWithoutAnAnnouncement() {
+        startDriving(25)
+        val out = driveNorth(cw.lat, cw.lon, -200, 180)
+        assertTrue(ids(out).none { it == GuidanceId.DARK_CROSSWALK })
+        val c = engine.crossings.single()
+        assertEquals(25, c.minKmh)
+        assertEquals(Crossing.Outcome.SLOWED, c.outcome)
+    }
+
+    @Test
+    fun denseCrosswalks_areEachRecorded() {
+        crosswalkMap = CrosswalkMap(listOf(cw, cw2))
+        startDriving(40)
+        driveNorth(cw.lat, cw.lon, -300, 200, step = 15)
+        assertEquals(listOf("c1", "c2"), engine.crossings.map { it.crosswalkId })
+    }
+
+    @Test
+    fun crossing_isNotRecordedTwice_whenTheFixJittersBack() {
+        startDriving(40)
+        driveNorth(cw.lat, cw.lon, -300, 60)
+        listOf(20, 0, 20, 60).forEach { moveTo(cw.lat, cw.lon, it.toDouble()) }
+        assertEquals(1, engine.crossings.size)
+    }
+
     @Test
     fun crosswalkCsv_parsesTheAssetFormat() {
         val m = CrosswalkCsv.parse(

@@ -93,7 +93,7 @@
     <string name="records_crossings_title">지난 어두운 횡단보도</string>
     <string name="crossing_slowed">줄임</string>
     <string name="crossing_passed">그대로 통과</string>
-    <string name="records_crossings_note">안내한 횡단보도 30m 안에서 가장 낮았던 속도입니다. 시속 30km 이하면 줄임으로 적습니다.</string>
+    <string name="records_crossings_note">밤에 지난 어두운 횡단보도 30m 안에서 가장 낮았던 속도입니다. 안내하지 않은 곳도 적습니다. 시속 30km 이하면 줄임으로 적습니다.</string>
     <string name="data_title">이 근처 점멸 신호 데이터</string>
     <string name="data_region">기준일 %1$s  밤 점멸 %2$d곳</string>
     <string name="data_none">이 근처 10km에는 밤 점멸 정보가 없습니다</string>
