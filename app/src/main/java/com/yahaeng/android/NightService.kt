@@ -64,7 +64,7 @@ class NightService : Service() {
             .setContentIntent(open)
             .setOngoing(true)
             .setSilent(true)
-            // NAVIGATION으로 두면 Pleos가 닫히지 않는 팝업으로 띄운다(로드메이트에서 확인). 서비스 알림은 SERVICE
+            // NAVIGATION으로 두면 Pleos가 닫히지 않는 팝업으로 띄운다(에뮬레이터에서 확인). 서비스 알림은 SERVICE
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()

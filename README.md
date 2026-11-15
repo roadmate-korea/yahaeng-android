@@ -126,7 +126,7 @@ python3 -I -m unittest discover -s tools/crosswalks   # 변환 도구 테스트
 ## 실행
 
 ```bash
-adb install -r apk/RoadMate_Yahaeng_release.apk
+adb install -r apk/Yahaeng_release.apk
 adb forward tcp:8088 tcp:8088     # Virtual Console: http://127.0.0.1:8088/
 ```
 
@@ -138,7 +138,7 @@ adb forward tcp:8088 tcp:8088     # Virtual Console: http://127.0.0.1:8088/
 
 ## APK 파일
 
-[`apk/RoadMate_Yahaeng_release.apk`](apk/RoadMate_Yahaeng_release.apk) (release 빌드, 버전 1.0.0)
+[`apk/Yahaeng_release.apk`](apk/Yahaeng_release.apk) (release 빌드, 버전 1.0.0)
 
 ## 시연 방법
 
