@@ -312,6 +312,13 @@ fun ParkedScreen(
                     ) { T(stringResource(res), NightType.body, if (on) Night.bg else Night.text) }
                 }
             }
+            // 시연 중에는 어느 탭에서든 시연 표시와 끝내기 버튼을 보인다(기록과 데이터 탭의 내용도 시연 것이다)
+            if (ui.demo && tab != 0) {
+                Row(Modifier.fillMaxWidth().padding(start = 48.dp, end = 48.dp, top = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    Badge(stringResource(R.string.demo_badge), Night.yellow)
+                    DemoButton(demo = true, onStart = null, onStop = onDemoStop)
+                }
+            }
             when (tab) {
                 0 -> DrivePanel(ui, caption, Modifier.widthIn(max = 900.dp), onDemoStart, onDemoStop)
                 1 -> RecordsScreen(ui)

@@ -11,7 +11,6 @@ import com.yahaeng.android.rules.CrosswalkMap
 import com.yahaeng.android.rules.DarkCrosswalk
 import com.yahaeng.android.rules.DemoClock
 import com.yahaeng.android.rules.DemoRoute
-import com.yahaeng.android.rules.Gear
 import com.yahaeng.android.rules.TurnSignal
 import com.yahaeng.android.rules.FlashMap
 import com.yahaeng.android.rules.FlashingIntersection
@@ -129,12 +128,21 @@ class NightController(
                 val wait = step.atMs - (SystemClock.elapsedRealtime() - t0)
                 if (wait > 0) delay(wait)
                 if (demo !== d) return@launch
+                // 재생 직전마다 실제로 P에 서 있는지 다시 본다(기어를 읽지 못하게 된 경우도 끝낸다)
+                if (stopDemoIfNotParked()) return@launch
                 applyDemo(d, step.event)
             }
             delay(DemoRoute.durationMs(steps) - (SystemClock.elapsedRealtime() - t0))
             if (demo === d) stopDemo()
         }
         publish()
+    }
+
+    /** 실제 차량이 정상적으로 확인된 P가 아니면(기어 오류, 감시 시간 초과 포함) 시연을 끝낸다. 끝냈으면 true. */
+    private fun stopDemoIfNotParked(): Boolean {
+        if (demo == null || !hub.vehicle.value.locked) return false
+        stopDemo()
+        return true
     }
 
     fun stopDemo() {
@@ -175,6 +183,7 @@ class NightController(
             }
             while (isActive) {
                 delay(1_000)
+                stopDemoIfNotParked()
                 handle(engine.tick())
                 demo?.let { handle(it.engine.tick(), fromDemo = true) }
                 replanIfNeeded()
@@ -184,6 +193,9 @@ class NightController(
     }
 
     private fun onSignal(signal: RawSignal) {
+        // 시연은 정차 중에만. 실제 기어가 P에서 바뀌거나 읽을 수 없게 되면, 이 신호를 실제 판단에 넣기 전에 끝낸다
+        // (먼저 끝내야 이 신호로 생긴 실제 안내를 시연 중이라고 버리지 않는다)
+        stopDemoIfNotParked()
         val event = SignalMapper.map(signal) ?: return publish()
         when (event) {
             is NightEvent.LocationChanged -> {
@@ -195,8 +207,6 @@ class NightController(
             else -> Unit
         }
         handle(engine.on(event))
-        // 시연은 정차 중에만. 실제로 P에서 벗어나면 바로 끝낸다
-        if (event is NightEvent.GearChanged && event.gear != Gear.PARK) stopDemo()
         if (event is NightEvent.LocationChanged) replanIfNeeded()
         publish()
     }
