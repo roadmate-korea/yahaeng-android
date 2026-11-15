@@ -9,6 +9,10 @@ import com.yahaeng.android.rules.Clock
 import com.yahaeng.android.rules.Crossing
 import com.yahaeng.android.rules.CrosswalkMap
 import com.yahaeng.android.rules.DarkCrosswalk
+import com.yahaeng.android.rules.DemoClock
+import com.yahaeng.android.rules.DemoRoute
+import com.yahaeng.android.rules.Gear
+import com.yahaeng.android.rules.TurnSignal
 import com.yahaeng.android.rules.FlashMap
 import com.yahaeng.android.rules.FlashingIntersection
 import com.yahaeng.android.rules.Guidance
@@ -20,6 +24,7 @@ import com.yahaeng.android.rules.Passage
 import com.yahaeng.android.rules.ProximityPlanner
 import com.yahaeng.android.rules.minuteOfDay
 import com.yahaeng.android.voice.GuidanceSpeaker
+import android.os.SystemClock
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -56,6 +61,8 @@ data class NightUi(
     val dataRegions: Int = 0,
     val dataSize: Int = 0,
     val crosswalkDataSize: Int = 0,
+    /** 정차 중 시연 재생 중이다. 화면의 상태와 기록은 시연 것이다. */
+    val demo: Boolean = false,
 )
 
 /**
@@ -94,13 +101,72 @@ class NightController(
     private var cruiseTarget: Int? = null
     private var job: Job? = null
 
+    /**
+     * 정차 중 시연 재생. 실제 판단 로직과 따로 만든 판단 로직에 시연 경로([DemoRoute])를 넣는다.
+     * 실제 시계, 실제 기록, 실제 설정은 건드리지 않고, 끝나면 버린다.
+     */
+    private class Demo(val engine: NightEngine) {
+        var lat: Double? = null
+        var lon: Double? = null
+        var turn = TurnSignal.OFF
+        var cruiseTarget: Int? = null
+        var job: Job? = null
+    }
+
+    private var demo: Demo? = null
+
+    /** 시연 재생을 시작한다. 실제 기어가 P일 때만. 실제 기어가 P에서 바뀌면 바로 끝난다. */
+    fun startDemo() {
+        if (demo != null || hub.vehicle.value.locked) return
+        speaker.stopAll()
+        val d = Demo(NightEngine({ map.value }, DemoClock(clock), { crosswalks.value }))
+        demo = d
+        Log.i(TAG, "demo start")
+        val steps = DemoRoute.steps(map.value)
+        d.job = scope.launch {
+            val t0 = SystemClock.elapsedRealtime()
+            for (step in steps) {
+                val wait = step.atMs - (SystemClock.elapsedRealtime() - t0)
+                if (wait > 0) delay(wait)
+                if (demo !== d) return@launch
+                applyDemo(d, step.event)
+            }
+            delay(DemoRoute.durationMs(steps) - (SystemClock.elapsedRealtime() - t0))
+            if (demo === d) stopDemo()
+        }
+        publish()
+    }
+
+    fun stopDemo() {
+        val d = demo ?: return
+        demo = null
+        Log.i(TAG, "demo stop")
+        d.job?.cancel()
+        speaker.stopAll()
+        publish()
+    }
+
+    private fun applyDemo(d: Demo, event: NightEvent) {
+        when (event) {
+            is NightEvent.LocationChanged -> {
+                d.lat = event.lat
+                d.lon = event.lon
+            }
+            is NightEvent.TurnSignalChanged -> d.turn = event.signal
+            is NightEvent.CruiseTargetChanged -> d.cruiseTarget = event.kmh
+            else -> Unit
+        }
+        handle(d.engine.on(event), fromDemo = true)
+        publish()
+    }
+
     /** 여러 번 불러도 한 번만 시작한다. */
     fun start() {
         if (job != null) return
         hub.start()
         // 기다리던 안내는 재생 직전에 지금도 맞는지 다시 본다(교차로를 벗어났거나 방향, 와이퍼, 제한 속도가 바뀌었을 수 있다)
         speaker.revalidate = { g, _ ->
-            engine.revalidate(g)?.takeIf { allowedVoice(it) }?.let { it to texts.text(it, map.value) }
+            (demo?.engine ?: engine).revalidate(g)?.takeIf { allowedVoice(it) }?.let { it to texts.text(it, map.value) }
         }
         speaker.start()
         job = scope.launch {
@@ -110,6 +176,7 @@ class NightController(
             while (isActive) {
                 delay(1_000)
                 handle(engine.tick())
+                demo?.let { handle(it.engine.tick(), fromDemo = true) }
                 replanIfNeeded()
                 publish()
             }
@@ -128,22 +195,26 @@ class NightController(
             else -> Unit
         }
         handle(engine.on(event))
+        // 시연은 정차 중에만. 실제로 P에서 벗어나면 바로 끝낸다
+        if (event is NightEvent.GearChanged && event.gear != Gear.PARK) stopDemo()
         if (event is NightEvent.LocationChanged) replanIfNeeded()
         publish()
     }
 
-    private fun handle(guidance: List<Guidance>) {
+    private fun handle(guidance: List<Guidance>, fromDemo: Boolean = false) {
+        // 시연 중에는 시연 안내만 말한다(차는 P에 서 있다). 실제 판단 상태는 계속 갱신한다
+        if (demo != null && !fromDemo) return
         val s = settings.state.value
         for (g in guidance) {
             // 음성과 팝업은 따로 켜고 끈다
-            if (g.id == GuidanceId.FLASH_AHEAD && s.popup && !screenVisible()) {
+            if (!fromDemo && g.id == GuidanceId.FLASH_AHEAD && s.popup && !screenVisible()) {
                 popup?.show(texts.popupTitle(), texts.popupText())
             }
             if (!allowedVoice(g)) continue
             // 비 오는 밤 안내는 기다리는 것을 하나만 둔다(제한 속도가 바뀌어 새로 나오면 앞의 것을 버린다)
             if (g.id in RAIN_IDS) RAIN_IDS.forEach(speaker::drop)
             // 안내 종류만 남긴다(위치와 문장 내용은 로그에 남기지 않는다)
-            Log.i(TAG, "say ${g.id}")
+            Log.i(TAG, if (fromDemo) "demo say ${g.id}" else "say ${g.id}")
             speaker.say(g, texts.text(g, map.value), KOREAN)
         }
     }
@@ -175,11 +246,15 @@ class NightController(
     }
 
     private fun publish() {
-        val state = engine.state()
+        val d = demo
+        val source = d?.engine ?: engine
+        val state = source.state()
         val m = map.value
         val approaching = state.approaching?.let { m[it] }
-        val la = lat
-        val lo = lon
+        val la = if (d != null) d.lat else lat
+        val lo = if (d != null) d.lon else lon
+        val turn = if (d != null) d.turn else turn
+        val cruiseTarget = if (d != null) d.cruiseTarget else cruiseTarget
         val distance = if (approaching != null && la != null && lo != null) {
             FlashMap.distanceMeters(la, lo, approaching.lat, approaching.lon).toInt()
         } else null
@@ -207,15 +282,16 @@ class NightController(
             turnRight = approaching != null && turn == com.yahaeng.android.rules.TurnSignal.RIGHT,
             cruiseTarget = cruiseTarget,
             // 오늘 밤 기록(엔진이 밤 단위로 지운다). 기록은 메모리에만 있어 앱 프로세스가 끝나면 사라진다
-            passages = engine.passages.reversed(),
+            passages = source.passages.reversed(),
             crosswalk = crosswalk,
             crosswalkDistanceMeters = crosswalkDistance,
-            crossings = engine.crossings.reversed(),
+            crossings = source.crossings.reversed(),
             regions = regions,
             crosswalkRegions = crosswalkRegions,
             dataRegions = m.intersections.map { it.region }.distinct().size,
             dataSize = m.size,
             crosswalkDataSize = cm.size,
+            demo = d != null,
         )
     }
 

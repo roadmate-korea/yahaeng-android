@@ -48,7 +48,7 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                     ui.vehicle.locked -> DrivePanel(ui, caption)
-                    else -> ParkedScreen(ui, caption, settings, app.settings::update)
+                    else -> ParkedScreen(ui, caption, settings, app.settings::update, controller::startDemo, controller::stopDemo)
                 }
             }
         }
