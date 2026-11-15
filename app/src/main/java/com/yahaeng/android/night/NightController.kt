@@ -6,6 +6,9 @@ import com.yahaeng.android.drive.SignalMapper
 import com.yahaeng.android.drive.VehicleStatus
 import com.yahaeng.android.location.ProximityZones
 import com.yahaeng.android.rules.Clock
+import com.yahaeng.android.rules.Crossing
+import com.yahaeng.android.rules.CrosswalkMap
+import com.yahaeng.android.rules.DarkCrosswalk
 import com.yahaeng.android.rules.FlashMap
 import com.yahaeng.android.rules.FlashingIntersection
 import com.yahaeng.android.rules.Guidance
@@ -42,9 +45,17 @@ data class NightUi(
     val turnRight: Boolean = false,
     val cruiseTarget: Int? = null,
     val passages: List<Passage> = emptyList(),
+    /** 안내한 뒤 다가가는 어두운 횡단보도와 거리(m). */
+    val crosswalk: DarkCrosswalk? = null,
+    val crosswalkDistanceMeters: Int? = null,
+    val crossings: List<Crossing> = emptyList(),
+    /** 이 근처(10km) 점멸 데이터 지역. 비었으면 이 지역은 점멸 정보가 없다. */
     val regions: List<RegionInfo> = emptyList(),
+    /** 이 근처(10km) 어두운 횡단보도 데이터 지역. */
+    val crosswalkRegions: List<RegionInfo> = emptyList(),
     val dataRegions: Int = 0,
     val dataSize: Int = 0,
+    val crosswalkDataSize: Int = 0,
 )
 
 /**
@@ -58,6 +69,7 @@ class NightController(
     private val hub: DriveSignalHub,
     private val zones: ProximityZones,
     private val map: StateFlow<FlashMap>,
+    private val crosswalks: StateFlow<CrosswalkMap>,
     private val speaker: GuidanceSpeaker,
     private val texts: GuidanceTexts,
     private val settings: Settings,
@@ -66,7 +78,7 @@ class NightController(
     private val clock: Clock,
     private val scope: CoroutineScope,
 ) {
-    private val engine = NightEngine({ map.value }, clock)
+    private val engine = NightEngine({ map.value }, clock, { crosswalks.value })
 
     private val _ui = MutableStateFlow(NightUi())
     val ui: StateFlow<NightUi> = _ui.asStateFlow()
@@ -141,6 +153,7 @@ class NightController(
         return when (g.id) {
             in FLASH_IDS -> s.flashVoice
             GuidanceId.RAIN_SPEED, GuidanceId.RAIN_SPEED_CRUISE -> s.rain
+            GuidanceId.DARK_CROSSWALK -> s.crosswalk
             else -> true
         }
     }
@@ -175,6 +188,16 @@ class NightController(
                 .map { (region, list) -> RegionInfo(region, list.first().first.baseDate, list.size) }
                 .sortedByDescending { it.count }
         } else emptyList()
+        val cm = crosswalks.value
+        val crosswalk = state.crosswalk?.let { cm[it] }
+        val crosswalkDistance = if (crosswalk != null && la != null && lo != null) {
+            FlashMap.distanceMeters(la, lo, crosswalk.lat, crosswalk.lon).toInt()
+        } else null
+        val crosswalkRegions = if (la != null && lo != null) {
+            cm.near(la, lo, NightEngine.NEARBY_METERS).groupBy { it.first.region }
+                .map { (region, list) -> RegionInfo(region, list.first().first.baseDate, list.size) }
+                .sortedByDescending { it.count }
+        } else emptyList()
         _ui.value = NightUi(
             engine = state,
             vehicle = hub.vehicle.value,
@@ -185,9 +208,14 @@ class NightController(
             cruiseTarget = cruiseTarget,
             // 오늘 밤 기록(엔진이 밤 단위로 지운다). 기록은 메모리에만 있어 앱 프로세스가 끝나면 사라진다
             passages = engine.passages.reversed(),
+            crosswalk = crosswalk,
+            crosswalkDistanceMeters = crosswalkDistance,
+            crossings = engine.crossings.reversed(),
             regions = regions,
+            crosswalkRegions = crosswalkRegions,
             dataRegions = m.intersections.map { it.region }.distinct().size,
             dataSize = m.size,
+            crosswalkDataSize = cm.size,
         )
     }
 

@@ -41,6 +41,7 @@ import androidx.compose.material3.Icon
 import com.yahaeng.android.R
 import com.yahaeng.android.night.NightUi
 import com.yahaeng.android.night.SettingsState
+import com.yahaeng.android.rules.Crossing
 import com.yahaeng.android.rules.Passage
 import com.yahaeng.android.voice.GuidanceSpeaker
 import java.text.SimpleDateFormat
@@ -112,6 +113,7 @@ fun OnboardingScreen(parked: Boolean, dataRegions: Int, dataSize: Int, onStart: 
                 for ((t, d, c) in listOf(
                     Triple(R.string.onboard_auto_title, R.string.onboard_auto_desc, Night.moon),
                     Triple(R.string.onboard_flash_title, R.string.onboard_flash_desc, Night.yellow),
+                    Triple(R.string.onboard_crosswalk_title, R.string.onboard_crosswalk_desc, Night.moon),
                     Triple(R.string.onboard_rain_title, R.string.onboard_rain_desc, Night.rain),
                 )) {
                     Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -161,7 +163,7 @@ private fun hhmm(minute: Int) = "%02d:%02d".format(minute / 60, minute % 60)
 fun DrivePanel(ui: NightUi, caption: GuidanceSpeaker.Caption?, modifier: Modifier = Modifier) {
     val e = ui.engine
     val status = when {
-        ui.approaching != null -> stringResource(R.string.status_night)
+        ui.approaching != null || ui.crosswalk != null -> stringResource(R.string.status_night)
         e.wetLimit != null -> stringResource(R.string.status_rain)
         !e.hasLocation -> stringResource(R.string.status_no_location)
         e.night -> stringResource(R.string.status_night)
@@ -173,6 +175,7 @@ fun DrivePanel(ui: NightUi, caption: GuidanceSpeaker.Caption?, modifier: Modifie
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(28.dp)) {
             when {
                 ui.approaching != null -> ApproachContent(ui)
+                ui.crosswalk != null -> CrosswalkContent(ui)
                 e.wetLimit != null -> RainContent(ui)
                 else -> StandbyContent(ui)
             }
@@ -192,19 +195,9 @@ private fun ColumnScope.StandbyContent(ui: NightUi) {
             if (!e.night) T(stringResource(R.string.sunset_desc), NightType.body)
         }
     }
-    val nearby = e.nearbyTonight
-    if (nearby != null) {
-        Card(Modifier.fillMaxWidth()) {
-            T(stringResource(R.string.nearby_label), NightType.body, Night.sub)
-            if (nearby > 0) {
-                T(stringResource(R.string.count_places, nearby), NightType.headline, Night.yellow)
-                T(ui.regions.joinToString(", ") { "${it.region.substringAfter(' ')} (${it.baseDate.take(7)})" }, NightType.caption, Night.sub)
-            } else {
-                T(stringResource(R.string.nearby_none), NightType.body)
-            }
-        }
-    }
     Spacer(Modifier.weight(1f))
+    // 근처 교차로 수는 운전자에게 필요 없어 보여 주지 않는다. 점멸 정보가 없는 지역이라는 사실만 작게 알린다
+    if (e.hasLocation && ui.dataSize > 0 && ui.regions.isEmpty()) T(stringResource(R.string.nearby_none), NightType.caption, Night.sub)
     T(stringResource(if (e.night) R.string.night_note else R.string.day_note), NightType.caption, Night.sub)
 }
 
@@ -224,6 +217,18 @@ private fun ColumnScope.ApproachContent(ui: NightUi) {
             T(stringResource(if (ui.turnLeft) R.string.say_flash_turn_left else R.string.say_flash_turn_right), NightType.body)
         }
     }
+}
+
+@Composable
+private fun ColumnScope.CrosswalkContent(ui: NightUi) {
+    val c = ui.crosswalk ?: return
+    Column {
+        Badge(stringResource(R.string.crosswalk_badge), Night.moon)
+        ui.crosswalkDistanceMeters?.let { T(stringResource(R.string.distance_m, it), NightType.display, Night.moon) }
+        T(if (c.road.isNotBlank()) stringResource(R.string.crosswalk_road, c.road) else stringResource(R.string.crosswalk_unnamed), NightType.headline)
+        T(stringResource(R.string.crosswalk_lanes, c.lanes), NightType.body, Night.sub)
+    }
+    RuleRow(Night.moon, stringResource(R.string.crosswalk_rule), stringResource(R.string.crosswalk_rule_do))
 }
 
 @Composable
@@ -304,12 +309,38 @@ private fun RecordsScreen(ui: NightUi) {
         if (list.isEmpty()) T(stringResource(R.string.records_empty), NightType.body, Night.sub)
         list.forEach { PassageRow(it) }
         T(stringResource(R.string.records_note), NightType.caption, Night.sub)
+        if (ui.crossings.isNotEmpty()) {
+            T(stringResource(R.string.records_crossings_title), NightType.title)
+            ui.crossings.forEach { CrossingRow(it) }
+            T(stringResource(R.string.records_crossings_note), NightType.caption, Night.sub)
+        }
+    }
+}
+
+private val timeFormat get() = SimpleDateFormat("HH:mm", Locale.KOREA).apply { timeZone = TimeZone.getTimeZone("Asia/Seoul") }
+
+@Composable
+private fun CrossingRow(c: Crossing) {
+    val fmt = remember { timeFormat }
+    val (label, color) = when (c.outcome) {
+        Crossing.Outcome.SLOWED -> stringResource(R.string.crossing_slowed) to Night.stopped
+        Crossing.Outcome.PASSED -> stringResource(R.string.crossing_passed) to Night.yellow
+        Crossing.Outcome.UNKNOWN -> stringResource(R.string.outcome_unknown) to Night.sub
+    }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Night.surface).padding(horizontal = 36.dp, vertical = 26.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(32.dp),
+    ) {
+        T(fmt.format(Date(c.atMillis)), NightType.title, Night.sub)
+        T(if (c.road.isNotBlank()) stringResource(R.string.crosswalk_road, c.road) else stringResource(R.string.crosswalk_unnamed), NightType.title, modifier = Modifier.weight(1f))
+        T(c.minKmh?.let { stringResource(R.string.records_min_speed, it) } ?: stringResource(R.string.records_min_speed_unknown), NightType.body)
+        Badge(label, color)
     }
 }
 
 @Composable
 private fun PassageRow(p: Passage) {
-    val fmt = remember { SimpleDateFormat("HH:mm", Locale.KOREA).apply { timeZone = TimeZone.getTimeZone("Asia/Seoul") } }
+    val fmt = remember { timeFormat }
     val (label, color) = when (p.outcome) {
         Passage.Outcome.STOPPED -> stringResource(R.string.outcome_stopped) to Night.stopped
         Passage.Outcome.SLOWED -> stringResource(R.string.outcome_slowed) to Night.moon
@@ -343,6 +374,15 @@ private fun DataSettingsScreen(ui: NightUi, s: SettingsState, onSettings: ((Sett
                 }
             }
             T(stringResource(R.string.data_source), NightType.caption, Night.sub)
+            T(stringResource(R.string.crosswalk_data_title), NightType.title, modifier = Modifier.padding(top = 20.dp))
+            if (ui.crosswalkRegions.isEmpty()) Card(Modifier.fillMaxWidth()) { T(stringResource(R.string.data_crosswalk_none), NightType.body) }
+            ui.crosswalkRegions.forEach { r ->
+                Card(Modifier.fillMaxWidth()) {
+                    T(r.region, NightType.body)
+                    T(stringResource(R.string.data_crosswalk_region, r.baseDate, r.count), NightType.caption, Night.moon)
+                }
+            }
+            T(stringResource(R.string.data_crosswalk_source), NightType.caption, Night.sub)
         }
     }
     val toggles: @Composable (Modifier) -> Unit = { m ->
@@ -351,6 +391,7 @@ private fun DataSettingsScreen(ui: NightUi, s: SettingsState, onSettings: ((Sett
             Toggle(R.string.set_auto, R.string.set_auto_desc, s.autoStart) { v -> onSettings { it.copy(autoStart = v) } }
             Toggle(R.string.set_flash, R.string.set_flash_desc, s.flashVoice) { v -> onSettings { it.copy(flashVoice = v) } }
             Toggle(R.string.set_popup, R.string.set_popup_desc, s.popup) { v -> onSettings { it.copy(popup = v) } }
+            Toggle(R.string.set_crosswalk, R.string.set_crosswalk_desc, s.crosswalk) { v -> onSettings { it.copy(crosswalk = v) } }
             Toggle(R.string.set_rain, R.string.set_rain_desc, s.rain) { v -> onSettings { it.copy(rain = v) } }
         }
     }

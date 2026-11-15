@@ -5,11 +5,8 @@ enum class Priority { INFO, RULE, SAFETY }
 
 /** 안내 종류. 문장은 앱 리소스에서 이 ID로 찾는다. */
 enum class GuidanceId(val priority: Priority) {
-    /** 해가 졌다(또는 밤에 시동). args: [오늘 밤 근처 점멸 교차로 수] */
+    /** 해가 졌다(또는 밤에 시동). 밤 안내를 켠다는 한 문장. 근처 교차로 수 같은 숫자는 말하지 않는다. */
     NIGHT_START(Priority.INFO),
-
-    /** 해가 졌는데 이 근처에 점멸 신호 정보가 없다. 틀린 안내보다 없다고 말한다. */
-    NIGHT_START_NO_DATA(Priority.INFO),
 
     /** 지금 점멸로 운영 중인 교차로에 다가감. key: 교차로 ID */
     FLASH_AHEAD(Priority.SAFETY),
@@ -22,6 +19,12 @@ enum class GuidanceId(val priority: Priority) {
 
     /** 점멸 교차로를 멈추지 않고 지난 뒤, 차가 멈췄을 때 사실을 한 번 알림. key: 교차로 ID, args: [가장 낮은 속도] */
     FLASH_PASSED_WITHOUT_STOP(Priority.INFO),
+
+    /**
+     * 밤에 보행자 신호등도 집중 조명도 없는 횡단보도에 시속 30km 넘게 다가감. key: 횡단보도 ID.
+     * 점멸 교차로 안내와 겹치면 점멸 안내를 먼저 말하도록 한 단계 낮춘다.
+     */
+    DARK_CROSSWALK(Priority.RULE),
 
     /** 와이퍼가 계속 돌고 차가 젖은 노면 기준 속도보다 빠름. args: [제한 속도, 20% 줄인 속도] */
     RAIN_SPEED(Priority.RULE),

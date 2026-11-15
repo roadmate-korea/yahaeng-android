@@ -53,3 +53,6 @@ Thumbs.db
 *.tmp
 *.swp
 *~
+
+# ---- Python ----
+__pycache__/

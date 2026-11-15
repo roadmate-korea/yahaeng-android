@@ -22,8 +22,8 @@ class GuidanceTexts(private val context: Context) {
             }
             GuidanceId.RAIN_SPEED -> res.getString(R.string.say_rain_speed, g.args[1])
             GuidanceId.RAIN_SPEED_CRUISE -> res.getString(R.string.say_rain_speed_cruise, g.args[1], g.args[2])
-            GuidanceId.NIGHT_START -> res.getString(R.string.say_night_start, g.args[0])
-            GuidanceId.NIGHT_START_NO_DATA -> res.getString(R.string.say_night_start_no_data)
+            GuidanceId.DARK_CROSSWALK -> res.getString(R.string.say_dark_crosswalk)
+            GuidanceId.NIGHT_START -> res.getString(R.string.say_night_start)
             GuidanceId.NIGHT_SUMMARY -> res.getString(R.string.say_night_summary, g.args[0], g.args[1])
         }
     }

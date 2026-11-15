@@ -157,9 +157,11 @@ class NightEngineTest {
     }
 
     @Test
-    fun nightStart_saysThereIsNoData_farFromAnyIntersection() {
+    fun nightStart_saysNoCount_evenFarFromAnyIntersection() {
         engine.on(NightEvent.LocationChanged(35.1, 129.0))
-        assertEquals(listOf(GuidanceId.NIGHT_START_NO_DATA), ids(engine.on(NightEvent.GearChanged(Gear.DRIVE))))
+        val out = engine.on(NightEvent.GearChanged(Gear.DRIVE))
+        assertEquals(listOf(GuidanceId.NIGHT_START), ids(out))
+        assertTrue("근처 교차로 수는 말하지 않는다", out.single().args.isEmpty())
     }
 
     @Test
@@ -431,15 +433,6 @@ class NightEngineTest {
         assertEquals(listOf(2, 1), out.last { it.id == GuidanceId.NIGHT_SUMMARY }.args)
     }
 
-    @Test
-    fun nightStart_waitsUntilTheDataIsLoaded() {
-        var m = FlashMap.EMPTY
-        engine = NightEngine({ m }, clock)
-        engine.on(NightEvent.LocationChanged(guri.lat, guri.lon))
-        assertTrue(engine.on(NightEvent.GearChanged(Gear.DRIVE)).isEmpty())
-        m = map
-        assertEquals(listOf(GuidanceId.NIGHT_START), ids(engine.tick()))
-    }
 
     // ---- 2차 리뷰 반영 ----
 

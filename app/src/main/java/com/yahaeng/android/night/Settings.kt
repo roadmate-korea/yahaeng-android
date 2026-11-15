@@ -11,6 +11,7 @@ data class SettingsState(
     val flashVoice: Boolean = true,
     val popup: Boolean = true,
     val rain: Boolean = true,
+    val crosswalk: Boolean = true,
 )
 
 /** 사용자 설정. 기기 안(SharedPreferences)에만 둔다. */
@@ -26,6 +27,7 @@ class Settings(context: Context) {
         flashVoice = prefs.getBoolean(FLASH_VOICE, true),
         popup = prefs.getBoolean(POPUP, true),
         rain = prefs.getBoolean(RAIN, true),
+        crosswalk = prefs.getBoolean(CROSSWALK, true),
     )
 
     fun update(block: (SettingsState) -> SettingsState) {
@@ -36,6 +38,7 @@ class Settings(context: Context) {
             .putBoolean(FLASH_VOICE, next.flashVoice)
             .putBoolean(POPUP, next.popup)
             .putBoolean(RAIN, next.rain)
+            .putBoolean(CROSSWALK, next.crosswalk)
             .apply()
         _state.value = next
     }
@@ -46,5 +49,6 @@ class Settings(context: Context) {
         const val FLASH_VOICE = "flash_voice"
         const val POPUP = "popup"
         const val RAIN = "rain"
+        const val CROSSWALK = "crosswalk"
     }
 }

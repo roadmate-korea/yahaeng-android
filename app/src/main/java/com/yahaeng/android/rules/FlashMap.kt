@@ -1,12 +1,5 @@
 package com.yahaeng.android.rules
 
-import kotlin.math.PI
-import kotlin.math.asin
-import kotlin.math.cos
-import kotlin.math.floor
-import kotlin.math.sin
-import kotlin.math.sqrt
-
 /**
  * 점멸 운영 시간대. 분 단위(0~1439). 끝이 시작보다 작으면 자정을 넘는다(예: 23:00~05:00).
  * 끝 시각 자체는 점멸이 끝난 때라 포함하지 않는다.
@@ -44,51 +37,23 @@ data class FlashingIntersection(
     val baseDate: String,
 )
 
-/** 위치로 점멸 교차로를 찾는다. 위도와 경도 0.01도 격자로 나눠 둔다. */
+/** 위치로 점멸 교차로를 찾는다. */
 class FlashMap(val intersections: List<FlashingIntersection>) {
 
     private val byId = intersections.associateBy { it.id }
-    private val grid: Map<Long, List<FlashingIntersection>> = intersections.groupBy { cell(it.lat, it.lon) }
+    private val grid = GeoGrid(intersections, { it.lat }, { it.lon })
 
     operator fun get(id: String): FlashingIntersection? = byId[id]
 
     val size: Int get() = intersections.size
 
     /** [radiusMeters] 안의 교차로를 가까운 순으로. 반경은 수 km 정도까지만 쓴다(격자 탐색 범위). */
-    fun near(lat: Double, lon: Double, radiusMeters: Double): List<Pair<FlashingIntersection, Double>> {
-        val span = (radiusMeters / CELL_METERS).toInt() + 1
-        val (cy, cx) = cellXY(lat, lon)
-        val found = ArrayList<Pair<FlashingIntersection, Double>>()
-        for (dy in -span..span) for (dx in -span..span) {
-            grid[key(cy + dy, cx + dx)]?.forEach { p ->
-                val d = distanceMeters(lat, lon, p.lat, p.lon)
-                if (d <= radiusMeters) found += p to d
-            }
-        }
-        return found.sortedBy { it.second }
-    }
+    fun near(lat: Double, lon: Double, radiusMeters: Double): List<Pair<FlashingIntersection, Double>> = grid.near(lat, lon, radiusMeters)
 
     companion object {
         val EMPTY = FlashMap(emptyList())
 
-        private const val CELL_DEG = 0.01
-
-        /** 격자 한 칸의 대략적인 크기(위도 방향, 경도 방향은 한국에서 이보다 조금 작다). */
-        private const val CELL_METERS = 880.0
-
-        private fun cellXY(lat: Double, lon: Double) = floor(lat / CELL_DEG).toLong() to floor(lon / CELL_DEG).toLong()
-        private fun key(y: Long, x: Long) = y * 1_000_000L + x
-        private fun cell(lat: Double, lon: Double) = cellXY(lat, lon).let { key(it.first, it.second) }
-
-        fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-            val r = 6_371_000.0
-            val p1 = lat1 * PI / 180
-            val p2 = lat2 * PI / 180
-            val dp = (lat2 - lat1) * PI / 180
-            val dl = (lon2 - lon1) * PI / 180
-            val a = sin(dp / 2) * sin(dp / 2) + cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2)
-            return 2 * r * asin(sqrt(a))
-        }
+        fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double = Geo.distanceMeters(lat1, lon1, lat2, lon2)
     }
 }
 

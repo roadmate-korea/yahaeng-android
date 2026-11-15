@@ -39,9 +39,9 @@ class SpeechQueueTest {
 
     @Test
     fun greetingThenLhdIntro_keepOrder() {
-        add(GuidanceId.NIGHT_START_NO_DATA)
+        add(GuidanceId.NIGHT_START)
         add(GuidanceId.NIGHT_SUMMARY)
-        assertEquals(GuidanceId.NIGHT_START_NO_DATA, queue.poll()?.guidance?.id)
+        assertEquals(GuidanceId.NIGHT_START, queue.poll()?.guidance?.id)
         assertEquals(GuidanceId.NIGHT_SUMMARY, queue.poll()?.guidance?.id)
     }
 
@@ -56,14 +56,14 @@ class SpeechQueueTest {
 
     @Test
     fun expiredItems_areDropped_byPriority() {
-        add(GuidanceId.NIGHT_START_NO_DATA)
+        add(GuidanceId.NIGHT_START)
         add(GuidanceId.RAIN_SPEED)
         add(GuidanceId.FLASH_TURN_LEFT, 300)
         clock.advanceSeconds(16) // 점멸 안내(15초)는 만료
         assertEquals(GuidanceId.RAIN_SPEED, queue.poll()?.guidance?.id)
         add(GuidanceId.RAIN_SPEED)
         clock.advanceSeconds(21) // 비 오는 밤 안내(20초) 만료
-        assertEquals(GuidanceId.NIGHT_START_NO_DATA, queue.poll()?.guidance?.id)
+        assertEquals(GuidanceId.NIGHT_START, queue.poll()?.guidance?.id)
         add(GuidanceId.NIGHT_SUMMARY)
         clock.advanceSeconds(61) // 그 밖의 안내(60초)도 만료
         assertNull(queue.poll())

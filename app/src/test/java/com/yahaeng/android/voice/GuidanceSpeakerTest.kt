@@ -191,7 +191,7 @@ class GuidanceSpeakerTest {
         val engine = FakeEngine()
         val s = GuidanceSpeaker(engine, backgroundScope, Clock { testScheduler.currentTime })
         s.start()
-        s.say(g(GuidanceId.NIGHT_START_NO_DATA), "welcome", en)
+        s.say(g(GuidanceId.NIGHT_START), "welcome", en)
         s.say(g(GuidanceId.NIGHT_SUMMARY), "lhd", en)
         engine.finishInit()
         engine.complete()

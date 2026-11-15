@@ -13,6 +13,8 @@ import com.yahaeng.android.night.FlashPopup
 import com.yahaeng.android.night.GuidanceTexts
 import com.yahaeng.android.night.NightController
 import com.yahaeng.android.night.Settings
+import com.yahaeng.android.rules.CrosswalkCsv
+import com.yahaeng.android.rules.CrosswalkMap
 import com.yahaeng.android.rules.FlashCsv
 import com.yahaeng.android.rules.FlashMap
 import com.yahaeng.android.demo.DemoSupport
@@ -57,6 +59,9 @@ class YahaengApplication : Application() {
     private val _flashMap = MutableStateFlow(FlashMap.EMPTY)
     val flashMap: StateFlow<FlashMap> = _flashMap.asStateFlow()
 
+    private val _crosswalkMap = MutableStateFlow(CrosswalkMap.EMPTY)
+    val crosswalkMap: StateFlow<CrosswalkMap> = _crosswalkMap.asStateFlow()
+
     private var mapLoading = false
 
     private fun loadFlashMap() {
@@ -66,6 +71,9 @@ class YahaengApplication : Application() {
             runCatching { assets.open(FLASH_FILE).bufferedReader().useLines { FlashCsv.parse(it) } }
                 .onSuccess { _flashMap.value = it }
                 .onFailure { Log.w("YahaengData", "flashing signals not loaded", it) }
+            runCatching { assets.open(CROSSWALK_FILE).bufferedReader().useLines { CrosswalkCsv.parse(it) } }
+                .onSuccess { _crosswalkMap.value = it }
+                .onFailure { Log.w("YahaengData", "dark crosswalks not loaded", it) }
         }
     }
 
@@ -93,6 +101,7 @@ class YahaengApplication : Application() {
             hub = signalHub,
             zones = zones,
             map = flashMap,
+            crosswalks = crosswalkMap,
             speaker = GuidanceSpeaker(PleosTtsEngine(this), appScope, clock),
             texts = GuidanceTexts(this),
             settings = settings,
@@ -110,5 +119,6 @@ class YahaengApplication : Application() {
         const val CAR_SPEED = "android.car.permission.CAR_SPEED"
         const val FUSED_LOCATION = "pleos.car.permission.FUSED_LOCATION"
         const val FLASH_FILE = "flashing_signals.csv"
+        const val CROSSWALK_FILE = "dark_crosswalks.csv"
     }
 }

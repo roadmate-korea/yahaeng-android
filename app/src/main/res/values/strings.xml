@@ -11,8 +11,8 @@
     <string name="say_flash_passed">아까 점멸 교차로를 시속 %1$d킬로미터로 지났습니다. 점멸 신호에서는 노란 불이면 서행, 빨간 불이면 일단 멈춤입니다.</string>
     <string name="say_rain_speed">와이퍼가 계속 돌고 있습니다. 노면이 젖었다면 이 도로의 최고 속도는 시속 %1$d킬로미터입니다. 가변 속도 표지가 있으면 표지를 따르세요.</string>
     <string name="say_rain_speed_cruise">와이퍼가 계속 돌고 있습니다. 노면이 젖었다면 이 도로의 최고 속도는 시속 %1$d킬로미터입니다. 크루즈는 시속 %2$d에 맞춰져 있어요. 가변 속도 표지가 있으면 표지를 따르세요.</string>
-    <string name="say_night_start">해가 졌습니다. 오늘 밤 근처 점멸 교차로 %1$d곳을 알려 드릴게요.</string>
-    <string name="say_night_start_no_data">해가 졌습니다. 이 근처는 점멸 신호 정보가 없어 비 오는 밤 속도만 알려 드릴게요.</string>
+    <string name="say_dark_crosswalk">앞에 신호등과 조명이 없는 횡단보도가 있습니다. 밤에는 사람이 늦게 보이니 살피며 지나가세요.</string>
+    <string name="say_night_start">해가 졌습니다. 지금부터 밤에 달라지는 길을 알려 드릴게요.</string>
     <string name="say_night_summary">오늘 밤 점멸 교차로 %1$d곳을 지났고, %2$d곳에서 멈췄습니다.</string>
 
     <!-- 공통 -->
@@ -27,18 +27,20 @@
     <string name="unnamed_intersection">이름 없는 점멸 교차로</string>
 
     <!-- 첫 실행 -->
-    <string name="onboard_title">밤이 되면 바뀌는 도로 규칙을\n차가 먼저 알려 드립니다</string>
+    <string name="onboard_title">밤이 되면 달라지는 길을\n차가 먼저 알려 드립니다</string>
     <string name="onboard_auto_title">차가 켜지면 저절로 시작</string>
     <string name="onboard_auto_desc">한 번 허용하면 그다음부터는 앱을 열지 않아도 됩니다</string>
     <string name="onboard_flash_title">밤에만 점멸로 바뀌는 교차로</string>
     <string name="onboard_flash_desc">300m 앞에서 한 번, 노란 불과 빨간 불에 할 일을 알려 드립니다</string>
+    <string name="onboard_crosswalk_title">신호등도 조명도 없는 횡단보도</string>
+    <string name="onboard_crosswalk_desc">밤에 시속 30km 넘게 다가가면 150m 앞에서 한 번 말합니다</string>
     <string name="onboard_rain_title">비 오는 밤의 기준 속도</string>
     <string name="onboard_rain_desc">와이퍼가 계속 돌면 젖은 노면 기준 속도를 조건과 함께 말합니다</string>
     <string name="onboard_perm_title">처음 한 번만 허용해 주세요</string>
     <string name="onboard_perm_location">위치</string>
-    <string name="onboard_perm_location_desc">점멸 교차로와 견주는 데만 씁니다. 기기 밖으로 보내지 않습니다.</string>
+    <string name="onboard_perm_location_desc">점멸 교차로, 횡단보도와 견주는 데만 씁니다. 기기 밖으로 보내지 않습니다.</string>
     <string name="onboard_perm_speed">차 속도</string>
-    <string name="onboard_perm_speed_desc">교차로에서 실제로 멈췄는지 기록합니다.</string>
+    <string name="onboard_perm_speed_desc">교차로와 횡단보도에서 실제로 속도를 줄였는지 기록합니다.</string>
     <string name="onboard_start">허용하고 시작</string>
     <string name="onboard_parked_only">정차(P) 중에만 시작할 수 있습니다</string>
     <string name="onboard_data">데이터: %1$d개 지역 %2$d곳, 기준일은 화면에 표시</string>
@@ -47,11 +49,10 @@
     <string name="sunset_label">오늘 해 지는 시각</string>
     <string name="sunset_desc">해가 지면 저절로 안내를 시작합니다</string>
     <string name="sunrise_label">해 뜨는 시각</string>
-    <string name="nearby_label">오늘 밤 근처 10km 점멸 교차로</string>
     <string name="count_places">%1$d곳</string>
-    <string name="nearby_none">이 근처는 점멸 신호 정보가 없습니다. 비 오는 밤 안내만 동작합니다.</string>
+    <string name="nearby_none">이 지역은 밤 점멸 신호 정보가 없습니다</string>
     <string name="day_note">낮에는 말하지 않습니다. 화면을 닫아도 안내는 계속됩니다.</string>
-    <string name="night_note">점멸 교차로 300m 앞에서 한 번 말합니다. 화면을 닫아도 안내는 계속됩니다.</string>
+    <string name="night_note">가는 방향 앞의 점멸 교차로는 300m, 어두운 횡단보도는 150m 앞에서 한 번 말합니다. 화면을 닫아도 안내는 계속됩니다.</string>
     <string name="flash_badge">지금 점멸 운영 중  %1$s</string>
     <string name="distance_m">%1$dm</string>
     <string name="rule_yellow">노란 불 깜빡임</string>
@@ -60,6 +61,12 @@
     <string name="rule_red_do">정지선에서 일단 멈춤</string>
     <string name="turn_left_label">좌측 깜빡이를 켰어요</string>
     <string name="turn_right_label">우측 깜빡이를 켰어요</string>
+    <string name="crosswalk_badge">신호등과 조명이 없는 횡단보도</string>
+    <string name="crosswalk_road">%1$s 횡단보도</string>
+    <string name="crosswalk_unnamed">이름 없는 도로의 횡단보도</string>
+    <string name="crosswalk_lanes">%1$d차로</string>
+    <string name="crosswalk_rule">밤에는 사람이 늦게 보입니다</string>
+    <string name="crosswalk_rule_do">살피며 지나가기</string>
     <string name="wiper_badge">와이퍼 계속 작동 중</string>
     <string name="limit_label">제한 속도</string>
     <string name="wet_label">노면이 젖었다면</string>
@@ -83,17 +90,27 @@
     <string name="records_window">점멸 %1$s</string>
     <string name="records_empty">오늘 밤 지난 점멸 교차로가 아직 없습니다.</string>
     <string name="records_note">점수를 매기지 않습니다. 교차로 가운데 70m 안에서 가장 낮았던 속도만 남기고, 기록은 기기 안에만 두었다가 다음 날 지웁니다.</string>
+    <string name="records_crossings_title">지난 어두운 횡단보도</string>
+    <string name="crossing_slowed">줄임</string>
+    <string name="crossing_passed">그대로 통과</string>
+    <string name="records_crossings_note">안내한 횡단보도 30m 안에서 가장 낮았던 속도입니다. 시속 30km 이하면 줄임으로 적습니다.</string>
     <string name="data_title">이 근처 점멸 신호 데이터</string>
     <string name="data_region">기준일 %1$s  밤 점멸 %2$d곳</string>
     <string name="data_none">이 근처 10km에는 밤 점멸 정보가 없습니다</string>
     <string name="data_source">출처: 공공데이터포털 전국신호등표준데이터(지자체별 파일). 데이터가 없는 곳에서는 비 오는 밤 안내만 동작합니다.</string>
+    <string name="crosswalk_data_title">이 근처 어두운 횡단보도 데이터</string>
+    <string name="data_crosswalk_region">기준일 %1$s  %2$d곳</string>
+    <string name="data_crosswalk_none">이 근처 10km에는 어두운 횡단보도 정보가 없습니다</string>
+    <string name="data_crosswalk_source">출처: 공공데이터포털 전국횡단보도표준데이터(지자체별 파일). 보행자 신호등과 집중 조명이 둘 다 없다고 적힌 2차로 이상 횡단보도만 씁니다. 빈칸은 어둡다고 보지 않습니다.</string>
     <string name="settings_title">설정</string>
     <string name="set_auto">차가 켜지면 저절로 시작</string>
     <string name="set_auto_desc">앱을 열지 않아도 밤 안내가 동작합니다</string>
     <string name="set_flash">점멸 교차로 음성 안내</string>
-    <string name="set_flash_desc">300m 앞에서 한 번 말합니다</string>
+    <string name="set_flash_desc">가는 방향 앞 300m에서 한 번 말합니다</string>
     <string name="set_popup">점멸 알림 팝업</string>
     <string name="set_popup_desc">야행 화면이 없을 때 몇 초 띄웁니다</string>
+    <string name="set_crosswalk">어두운 횡단보도 음성 안내</string>
+    <string name="set_crosswalk_desc">신호등과 조명이 없는 횡단보도 150m 앞에서 한 번</string>
     <string name="set_rain">비 오는 밤 속도 안내</string>
     <string name="set_rain_desc">와이퍼가 계속 돌 때 젖은 노면 기준 속도</string>
 
